@@ -8,8 +8,10 @@ from exp.exp_short_term_forecasting import Exp_Short_Term_Forecast
 from exp.exp_anomaly_detection import Exp_Anomaly_Detection
 from exp.exp_classification import Exp_Classification
 from utils.print_args import print_args
-import random
+import random, wandb
 import numpy as np
+
+os.environ["WANDB_MODE"] = "offline"
 
 if __name__ == '__main__':
     fix_seed = 2021
@@ -172,6 +174,12 @@ if __name__ == '__main__':
         Exp = Exp_Classification
     else:
         Exp = Exp_Long_Term_Forecast
+
+    wandb.init(
+        project=args.model,
+        config=args,
+        dir=r"logs"
+        )
 
     if args.is_training:
         for ii in range(args.itr):
