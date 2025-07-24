@@ -7,9 +7,9 @@ import torch, os, time, wandb
 import numpy as np
 import torch.nn as nn
 
-class ExpMTDP(Exp_Basic):
+class ExpLSTM(Exp_Basic):
     def __init__(self, args):
-        super(ExpMTDP, self).__init__(args)
+        super(ExpLSTM, self).__init__(args)
 
     def _build_model(self):
         model = self.model_dict[self.args.model].Model(self.args)
@@ -70,8 +70,6 @@ class ExpMTDP(Exp_Basic):
             print('loading model')
             self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
 
-        preds = []
-        trues = []
         folder_path = './test_results/' + setting + '/'
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
@@ -115,6 +113,16 @@ class ExpMTDP(Exp_Basic):
         mape = np.mean(np.abs((y_trues - y_preds) / (y_trues + 1e-3))) * 100
         metrics = {'MAE': mae, 'RMSE': rmse, 'MAPE': mape}
         print(f"Test MAE {mae:.4f}, RMSE {rmse:.4f}, MAPE {mape:.2f}%")
+
+        f = open(folder_path + 'result.txt', 'w')
+        f.write('Test MAE: {:.4f}\n'.format(mae))
+        f.write('Test RMSE: {:.4f}\n'.format(rmse))
+        f.write('Test MAPE: {:.2f}%\n'.format(mape))
+        f.close()
+
+        np.savez(folder_path + 'pred.npz', y_preds)
+        np.savez(folder_path + 'true.npz', y_trues)
+
         return metrics
 
     def train(self, setting):
