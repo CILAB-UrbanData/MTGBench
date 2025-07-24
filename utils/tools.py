@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 import pandas as pd
-import math
+import math, wandb
 
 plt.switch_backend('agg')
 
@@ -20,6 +20,8 @@ def adjust_learning_rate(optimizer, epoch, args):
         }
     elif args.lradj == 'type3':
         lr_adjust = {epoch: args.learning_rate if epoch < 3 else args.learning_rate * (0.9 ** ((epoch - 3) // 1))}
+    elif args.lradj == 'type4':
+        lr_adjust = {epoch: args.learning_rate * (0.1 ** ((epoch - 1) // 50))}
     elif args.lradj == "cosine":
         lr_adjust = {epoch: args.learning_rate /2 * (1 + math.cos(epoch / args.train_epochs * math.pi))}
     if epoch in lr_adjust.keys():
@@ -27,6 +29,7 @@ def adjust_learning_rate(optimizer, epoch, args):
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
         print('Updating learning rate to {}'.format(lr))
+        wandb.log({"learning_rate": lr})
 
 
 class EarlyStopping:
