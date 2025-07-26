@@ -13,20 +13,20 @@ class GraphConv(nn.Module):
         return self.linear(out)
 
 class Model(nn.Module):
-    def __init__(self, configs):
+    def __init__(self, args):
         #in_feats=2,gcn_hidden=128,lstm_hidden=256,fusion='sum',dropout=0.5
         super().__init__()
         # 两个分支：Taxi & Bike
-        self.gcn_taxi = GraphConv(configs.in_feats, configs.gcn_hidden)  #in_feats包含入度和出度, gcn_hidden参考原文设置
-        self.gcn_bike = GraphConv(configs.in_feats, configs.gcn_hidden)
+        self.gcn_taxi = GraphConv(args.in_feats, args.gcn_hidden)  #in_feats包含入度和出度, gcn_hidden参考原文设置
+        self.gcn_bike = GraphConv(args.in_feats, args.gcn_hidden)
         # 双层 LSTM，用于捕捉时间依赖
-        self.lstm_taxi = nn.LSTM(configs.gcn_hidden, configs.lstm_hidden, num_layers=2,
-                                batch_first=True, dropout=configs.dropout)  
-        self.lstm_bike = nn.LSTM(configs.gcn_hidden, configs.lstm_hidden, num_layers=2,
-                                batch_first=True, dropout=configs.dropout)
+        self.lstm_taxi = nn.LSTM(args.gcn_hidden, args.lstm_hidden, num_layers=2,
+                                batch_first=True, dropout=args.dropout)  
+        self.lstm_bike = nn.LSTM(args.gcn_hidden, args.lstm_hidden, num_layers=2,
+                                batch_first=True, dropout=args.dropout)
         # 多源融合方式：'sum' 或 'concat'
-        self.fusion = configs.fusion
-        fusion_dim = configs.lstm_hidden if self.fusion=='sum' else configs.lstm_hidden * 2
+        self.fusion = args.fusion
+        fusion_dim = args.lstm_hidden if self.fusion=='sum' else args.lstm_hidden * 2
         # 融合后两层全连接
         self.fc1 = nn.Linear(fusion_dim, fusion_dim // 2)
         # 第二层接受 fc1 输出拼接融合特征
