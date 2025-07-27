@@ -3,6 +3,7 @@ import os
 import torch
 import torch.backends
 from exp.exp_lstm import ExpLSTM
+from exp.exp_prediction import ExpPrediction
 from utils.print_args import print_args
 import random, wandb
 import numpy as np
@@ -45,10 +46,19 @@ if __name__ == '__main__':
     parser.add_argument('--S', type=int, default=24, help='sequence length for traffic prediction')
     parser.add_argument('--dropout', type=float, default=0.5, help='dropout')
 
+    '''Trajnet's args'''
+    parser.add_argument('--T1', type=int, default=6, help='number of recent time steps')
+    parser.add_argument('--T2', type=int, default=2, help='number of daily time steps')
+    parser.add_argument('--T3', type=int, default=2, help='number of weekly time steps')
+    parser.add_argument('--n_s', type=int, default=5000, help='number of segments')
+    parser.add_argument('--kernel_size', type=int, default=2, help='kernel size for convolution')
+    parser.add_argument('--encoder_layers', type=int, default=3, help='number of layers in the model')
+    parser.add_argument('--outChannel_1', type=int, default=16, help='output channel for the first convolution layer')
+
     # optimization
     parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
     parser.add_argument('--itr', type=int, default=1, help='experiments times')
-    parser.add_argument('--train_epochs', type=int, default=200, help='train epochs')
+    parser.add_argument('--train_epochs', type=int, default=1, help='train epochs')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size of train input data')
     parser.add_argument('--patience', type=int, default=20, help='early stopping patience')
     parser.add_argument('--learning_rate', type=float, default=0.0001, help='optimizer learning rate')
@@ -66,11 +76,11 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    wandb.init(
-    project="Traffic-Benchmark",
-    config=vars(args),
-    dir=args.log_dir
-    )
+    # wandb.init(
+    # project="Traffic-Benchmark",
+    # config=vars(args),
+    # dir=args.log_dir
+    # )
 
     if torch.cuda.is_available() and args.use_gpu:
         args.device = torch.device('cuda:{}'.format(args.gpu))
@@ -93,6 +103,8 @@ if __name__ == '__main__':
 
     if args.task_name == 'TrafficLSTM':
         Exp = ExpLSTM
+    elif args.task_name == 'TrafficPrediction':
+        Exp = ExpPrediction
 
     if args.is_training:
         for ii in range(args.itr):
