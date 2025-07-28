@@ -161,8 +161,8 @@ class ExpPrediction(Exp_Basic):
                         pred = self.model(inputs)                       
                 else:   
                     pred = self.model(inputs)                  
-                pred = pred.cpu().numpy().reshape(-1, 6)
-                true = targets.cpu().numpy().reshape(-1, 6)
+                pred = pred.cpu().numpy().reshape(-1, self.args.pre_steps)
+                true = targets.cpu().numpy().reshape(-1, self.args.pre_steps)
                 y_preds.append(pred)
                 y_trues.append(true)
                 

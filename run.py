@@ -34,6 +34,9 @@ if __name__ == '__main__':
     parser.add_argument('--normalization', type=bool, default=True, help='whether to normalize the data')
     parser.add_argument('--log_dir', type=str, default='./logs/', help='location of log files')
 
+    # Prediction task
+    parser.add_argument('--pre_steps', type=int, default=6, help='the predictions time steps')
+
     # model define
     '''MDTP's args'''
     parser.add_argument('--in_feats', type=int, default=2, help='input feature dimension')
