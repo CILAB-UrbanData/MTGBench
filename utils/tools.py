@@ -1,10 +1,11 @@
 import os
-
+from datetime import datetime as dt
+from datetime import date, timedelta
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
 import pandas as pd
-import math, wandb
+import math, wandb, time
 
 plt.switch_backend('agg')
 
@@ -121,3 +122,37 @@ def adjustment(gt, pred):
 
 def cal_accuracy(y_pred, y_true):
     return np.mean(y_pred == y_true)
+
+def date_range(date1, date2):
+    # date1, date2 = '20160401', '20160428'
+    datetime1 = dt.strptime(date1, '%Y%m%d')
+    datetime2 = dt.strptime(date2, '%Y%m%d')
+    days = (datetime2 - datetime1).days + 1
+    date_list = [(datetime1 + timedelta(day)).strftime('%Y%m%d') for day in range(days)]
+    return date_list
+
+def time_difference(time1, time2):
+    # format: '25/03/2016 00:00:04'
+    # time_difference = time1 - time2
+    return (dt.strptime(time1, '%d/%m/%Y %H:%M:%S') - dt.strptime(time2, '%d/%m/%Y %H:%M:%S')).total_seconds()
+
+
+def df_to_csv(df, file_path, index=False):
+    print('Saving to file at %s'%(file_path))
+    if os.path.exists(file_path):
+        temp_file_path = '%s_temp'%(file_path)
+        df.to_csv(temp_file_path, index=index)
+        os.system('rm %s'%(file_path))
+        os.system('mv %s %s'%(temp_file_path, file_path))
+    else:
+        df.to_csv(file_path, index=index)
+    print('Saved.')
+
+def round_time(t, interval=5):
+    # t = '25/03/2016 12:26:45'
+    # output: '25/03/2016 12:25:00'
+    # interval: in minutes
+    interval = interval * 60 # convert minutes to seconds
+    datetime = dt.strptime(t, '%d/%m/%Y %H:%M:%S')
+    new_datetime = dt.fromtimestamp(int(time.mktime(datetime.timetuple())) // interval * interval)
+    return new_datetime.strftime('%d/%m/%Y %H:%M:%S')

@@ -73,66 +73,67 @@ class ExpPrediction(Exp_Basic):
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
         
-        if self.args.model == "Trajnet":
-            for epoch in range(self.args.train_epochs):
-                iter_count = 0
-                train_loss = []
-                self.model.train()
-                epoch_time = time.time()
-                train_data.on_epoch_start()
+        for epoch in range(self.args.train_epochs):
+            iter_count = 0
+            train_loss = []
+            self.model.train()
+            epoch_time = time.time()
 
-                for i, (inputs, target) in enumerate(train_loader):
-                    iter_count += 1
-                    model_optim.zero_grad()
+            if self.args.model == "Trajnet":
+                train_data.on_epoch_start() #Trajnet比较特殊，需要在每个epoch下手动shuffle一下，可能后面修改接口后可以改善
 
-                    target = target.to(self.args.device)
+            for i, (inputs, target) in enumerate(train_loader):
+                iter_count += 1
+                model_optim.zero_grad()
 
-                    if self.args.use_amp:
-                        with torch.cuda.amp.autocast():
-                            outputs = self.model(inputs)
-                            loss = criterion(outputs, target)
-                            train_loss.append(loss.item())
+                target = target.to(self.args.device)
 
-                    else:
+                if self.args.use_amp:
+                    with torch.cuda.amp.autocast():
                         outputs = self.model(inputs)
                         loss = criterion(outputs, target)
                         train_loss.append(loss.item())
 
-                    if (i + 1) % 100 == 0:
-                        print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(i + 1, epoch + 1, loss.item()))
-                        speed = (time.time() - time_now) / iter_count
-                        left_time = speed * ((self.args.train_epochs - epoch) * train_steps - i)
-                        print('\tspeed: {:.4f}s/iter; left time: {:.4f}s'.format(speed, left_time))
-                        iter_count = 0
-                        time_now = time.time()
+                else:
+                    outputs = self.model(inputs)
+                    loss = criterion(outputs, target)
+                    train_loss.append(loss.item())
 
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.grad_clip)
-                    if self.args.use_amp:
-                        scaler.scale(loss).backward()
-                        scaler.step(model_optim)
-                        scaler.update()
-                    else:
-                        loss.backward()
-                        model_optim.step()
+                if (i + 1) % 100 == 0:
+                    print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(i + 1, epoch + 1, loss.item()))
+                    speed = (time.time() - time_now) / iter_count
+                    left_time = speed * ((self.args.train_epochs - epoch) * train_steps - i)
+                    print('\tspeed: {:.4f}s/iter; left time: {:.4f}s'.format(speed, left_time))
+                    iter_count = 0
+                    time_now = time.time()
 
-                print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
-                train_loss = np.mean(train_loss)
-                vali_loss = self.vali(vali_data, vali_loader, criterion)
-                test_loss = self.vali(test_data, test_loader, criterion)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.grad_clip)
+                if self.args.use_amp:
+                    scaler.scale(loss).backward()
+                    scaler.step(model_optim)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    model_optim.step()
 
-                print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
-                    epoch + 1, train_steps, train_loss, vali_loss, test_loss))
-                wandb.log({
-                    "train_loss": train_loss,
-                    "vali_loss": vali_loss,
-                    "test_loss": test_loss
-                })
-                early_stopping(vali_loss, self.model, path)
-                if early_stopping.early_stop:
-                    print("Early stopping")
-                    break
+            print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
+            train_loss = np.mean(train_loss)
+            vali_loss = self.vali(vali_data, vali_loader, criterion)
+            test_loss = self.vali(test_data, test_loader, criterion)
 
-                adjust_learning_rate(model_optim, epoch + 1, self.args)
+            print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
+                epoch + 1, train_steps, train_loss, vali_loss, test_loss))
+            wandb.log({
+                "train_loss": train_loss,
+                "vali_loss": vali_loss,
+                "test_loss": test_loss
+            })
+            early_stopping(vali_loss, self.model, path)
+            if early_stopping.early_stop:
+                print("Early stopping")
+                break
+
+            adjust_learning_rate(model_optim, epoch + 1, self.args)
 
             best_model_path = path + '/' + 'checkpoint.pth'
             self.model.load_state_dict(torch.load(best_model_path))

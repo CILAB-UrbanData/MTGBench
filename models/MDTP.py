@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from layers.Gcn_Norm import gcn_norm
+from layers.Gcn_Related import gcn_norm
 
 class GraphConv(nn.Module):
     def __init__(self, in_feats, out_feats):

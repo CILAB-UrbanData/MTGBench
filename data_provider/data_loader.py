@@ -8,6 +8,9 @@ from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 from collections import defaultdict
 from sklearn.preprocessing import StandardScaler
+from datetime import datetime as dt
+from datetime import date, timedelta
+from utils.tools import date_range
 import warnings
 
 
@@ -190,3 +193,40 @@ class SF20_forTrajnet_Dataset(Dataset):
         inputs = forest
         
         return (inputs, T_start), targets_tensor
+
+class SF20_forTrGNN_Dataset(Dataset):
+    """
+    SF20 for TrGNN Dataset
+    """
+    def __init__(self, args, flag, start_date, end_date, 
+                 root_path, flow_path='sf_flow_100_trimmed.csv'):
+        self.args = args
+        self.root_path = root_path
+        self.dates = date_range(start_date, end_date)
+        self.flow_path = flow_path
+        flow_df = pd.concat([pd.read_csv('fastdatasf/flow_%s_%s.csv'%(date, date), index_col=0) for date in self.dates])
+        flow_df.columns = pd.Index(int(road_id) for road_id in flow_df.columns)
+        self.start_date = dt.strptime(start_date, '%Y%m%d')
+        self.end_date = dt.strptime(end_date, '%Y%m%d')
+
+        date_list = [self.start_date + timedelta(days=i) for i in range((self.end_date - self.start_date).days + 1)]
+        # 找出所有 weekday 的索引（周一到周五，weekday() 返回0~4）
+        weekdays = np.array([i for i, d in enumerate(date_list) if d.weekday() < 5])
+
+        assert flag in ['train', 'val', 'test']
+        N_len = len(flow_df)
+        train_n = int(N_len * 0.7)
+        val_n   = int(N_len * 0.1)
+        test_n  = N_len - train_n - val_n
+        segments = [('train', train_n),
+                    ('val',   val_n),
+                    ('test',  test_n)]
+        idx_map = {}
+        start = 0
+        for name, length in segments:
+            idx_map[name] = list(range(start, start + length))
+            start += length
+        flow_df = flow_df[idx_map[flag]]  # 按照flag划分数据集
+        self.flow = flow_df.values
+
+        
