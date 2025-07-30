@@ -2,7 +2,7 @@ import os
 from datetime import datetime as dt
 from datetime import date, timedelta
 import numpy as np
-import torch
+import torch, scipy
 import matplotlib.pyplot as plt
 import pandas as pd
 import math, wandb, time
@@ -156,3 +156,15 @@ def round_time(t, interval=5):
     datetime = dt.strptime(t, '%d/%m/%Y %H:%M:%S')
     new_datetime = dt.fromtimestamp(int(time.mktime(datetime.timetuple())) // interval * interval)
     return new_datetime.strftime('%d/%m/%Y %H:%M:%S')
+
+def to_sparse_tensor(dense_matrix):
+    coo = scipy.sparse.coo_matrix(dense_matrix)
+
+    indices = torch.LongTensor(np.vstack((coo.row, coo.col)).astype(np.int64))  # 强制转为int64
+    values = torch.FloatTensor(coo.data)
+    shape = coo.shape
+
+    # 推荐用新版API，避免警告
+    sparse_tensor = torch.sparse_coo_tensor(indices, values, torch.Size(shape))
+
+    return sparse_tensor

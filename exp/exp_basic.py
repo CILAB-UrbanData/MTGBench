@@ -1,6 +1,6 @@
 import os
 import torch
-from models import MDTP, Trajnet
+from models import MDTP, Trajnet, TrGNN
 
 
 class Exp_Basic(object):
@@ -8,7 +8,8 @@ class Exp_Basic(object):
         self.args = args
         self.model_dict = {
             'MDTP': MDTP,
-            'Trajnet': Trajnet
+            'Trajnet': Trajnet,
+            'TrGNN': TrGNN
         }
         if args.model == 'Mamba':
             print('Please make sure you have successfully installed mamba_ssm')

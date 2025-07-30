@@ -4,13 +4,14 @@ import pandas as pd
 import glob, random
 import re
 import torch
+import pickle as pkl
 from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 from collections import defaultdict
 from sklearn.preprocessing import StandardScaler
 from datetime import datetime as dt
 from datetime import date, timedelta
-from utils.tools import date_range
+from utils.tools import date_range, to_sparse_tensor
 import warnings
 
 
@@ -148,9 +149,7 @@ class SF20_forTrajnet_Dataset(Dataset):
                 raw_paths = traj
                 tensor_paths = torch.tensor(traj, dtype=torch.long)
                 self.samples.append((seg, raw_paths, tensor_paths, flow_values))
-
-
-    
+   
     def collate_fn(self, batch):
         """
         将多组(sample)合并成一个mini-batch：
@@ -204,6 +203,9 @@ class SF20_forTrGNN_Dataset(Dataset):
         self.root_path = root_path
         self.dates = date_range(start_date, end_date)
         self.flow_path = flow_path
+        preprocess_path = os.path.join(self.root_path, 'cache/preprocess_TrGNNsf_20.pkl')
+
+        # weekdays scaler都要有 
         flow_df = pd.concat([pd.read_csv('fastdatasf/flow_%s_%s.csv'%(date, date), index_col=0) for date in self.dates])
         flow_df.columns = pd.Index(int(road_id) for road_id in flow_df.columns)
         self.start_date = dt.strptime(start_date, '%Y%m%d')
@@ -211,10 +213,10 @@ class SF20_forTrGNN_Dataset(Dataset):
 
         date_list = [self.start_date + timedelta(days=i) for i in range((self.end_date - self.start_date).days + 1)]
         # 找出所有 weekday 的索引（周一到周五，weekday() 返回0~4）
-        weekdays = np.array([i for i, d in enumerate(date_list) if d.weekday() < 5])
+        self.weekdays = np.array([i for i, d in enumerate(date_list) if d.weekday() < 5])
 
         assert flag in ['train', 'val', 'test']
-        N_len = len(flow_df)
+        N_len = int(len(flow_df) * 23 / 24)  # 只保留23小时的数据
         train_n = int(N_len * 0.7)
         val_n   = int(N_len * 0.1)
         test_n  = N_len - train_n - val_n
@@ -226,7 +228,77 @@ class SF20_forTrGNN_Dataset(Dataset):
         for name, length in segments:
             idx_map[name] = list(range(start, start + length))
             start += length
-        flow_df = flow_df[idx_map[flag]]  # 按照flag划分数据集
-        self.flow = flow_df.values
+        scaler = StandardScaler().fit(
+            flow_df.iloc[idx_map['train'] + idx_map['val']].values
+            ) # normalize flow
+        self.scaler = scaler
+        
+        try:
+            print('Loading preprocessed data...')
+            with open(preprocess_path, 'rb') as f:
+                normalized_flows, transitions_ToD, W, W_norm = pkl.load(f)
+        except FileNotFoundError:
+            print("文件名有错或者还未进行预处理！")      
+            
+        self.normalized_flows = normalized_flows
+        self.transitions_ToD = transitions_ToD
+        self.idx_map = idx_map[flag]
+        self.flow = flow_df
+    
+    def __len__(self):
+        return len(self.idx_map)
+    
+    def __getitem__(self, idx):
+        i = self.idx_map[idx]
+        d = i // 92
+        t = i % 92       
 
+        X = self.normalized_flows[d*96+t: d*96+t+self.args.history_window]
+        T = tuple(self.transitions_ToD[t: t+self.args.history_window])
+        y_true = self.normalized_flows[d*96+t+self.args.history_window]
+
+        ToD = torch.from_numpy(np.eye(24)[np.full((self.flow.shape[1]), ((t+4) * 15 // 60) % 24)]).float() # one-hot encoding: hour of day. (n_road, 24)
+        DoW = torch.from_numpy(np.full((self.flow.shape[1], 1), int(d in self.weekdays))).float() # indicator: 1 for weekdays, 0 for weekends/PHs. (n_road, 1)
+
+        return X, T, ToD, DoW, y_true
+    
+    def collate_fn(self, batch):
+        """
+        batch: list of samples, 每个 sample=(X, T, ToD, DoW, y_true)
+        - X:      Tensor (history_window, n_road)
+        - T:      tuple of length H of sparse (n_road,n_road)
+        - ToD:    Tensor (n_road, 24)
+        - DoW:    Tensor (n_road, 1)
+        - y_true: Tensor (n_road,)
+        """
+        # unzip
+        Xs, Ts, ToDs, DoWs, ys = zip(*batch)
+        
+        # 1) stack X, ToD, DoW, y_true
+        X_batch   = torch.stack(Xs,   dim=0)  # (B, H, n_road)
+        ToD_batch = torch.stack(ToDs, dim=0)  # (B, n_road, 24)
+        DoW_batch = torch.stack(DoWs, dim=0)  # (B, n_road, 1)
+        y_batch   = torch.stack(ys,   dim=0)  # (B, n_road)
+        
+        # 2) collate T: list of tuples → tuple of lists
+        #    Ts is a tuple of length B, each entry is a tuple length H
+        #    we want a tuple of length H, each element is a list of length B
+        #    (方便后续在 forward 里，对每个时间步再做 batch 维度合并)
+        H = len(Ts[0])
+        # for t in [0..H-1], collect Ts[i][t] for i in batch
+        T_batch = tuple(
+            [ Ts[i][t] for i in range(len(Ts)) ]
+            for t in range(H)
+        )
+        # 现在 T_batch[t] 是一个长度 B 的 list，里面是稀疏矩阵 (n_road,n_road)
+        # 你可以在模型里再把它转换成 dense 并做 bmm，或自己写一个 sparse_bmm_batch
+        
+        # 3) 打包 input
+        inp = {
+            'X':   X_batch,
+            'T':   T_batch, #(H, B, n_road, n_road)
+            'ToD': ToD_batch,
+            'DoW': DoW_batch,
+        }
+        return inp, y_batch
         
