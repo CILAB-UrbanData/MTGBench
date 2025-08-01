@@ -4,7 +4,7 @@ import networkx as nx
 import pickle as pkl
 import numpy as np
 import time, torch
-from tools import date_range, to_sparse_tensor
+from .tools import date_range, to_sparse_tensor
 from sklearn.preprocessing import StandardScaler
 
 def normalize_adj(adj, mode='random walk'):
@@ -205,7 +205,7 @@ def extract_road_adj(G=None, road_list=None):
     
     return road_adj
 
-def preprocess_data(root_path, start_date, end_date, preprocess_path='data/sf_data/TrGNN/preprocess.pkl'):
+def preprocess_data(root_path, start_date, end_date, preprocess_path='data/sf_data/TrGNN/cache/preprocess_TrGNNsf_20.pkl'):
 
     if os.path.exists(preprocess_path):
         print('Loading preprocessed data...')
@@ -217,7 +217,7 @@ def preprocess_data(root_path, start_date, end_date, preprocess_path='data/sf_da
         preprocess_path = os.path.join(root_path, 'cache/preprocess_TrGNNsf_20.pkl')
 
         # weekdays scaler都要有 
-        flow_df = pd.concat([pd.read_csv('fastdatasf/flow_%s_%s.csv'%(date, date), index_col=0) for date in dates])
+        flow_df = pd.concat([pd.read_csv(os.path.join(root_path, 'flow_%s_%s.csv'%(date, date)), index_col=0) for date in dates])
         flow_df.columns = pd.Index(int(road_id) for road_id in flow_df.columns)
 
         N_len = int(len(flow_df) * 23 / 24)  # 只保留23小时的数据

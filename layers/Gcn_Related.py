@@ -49,6 +49,8 @@ def graph_propagation_sparse_batch(x, A, hop=10, dual=False):
         A_dense = A.to_dense().unsqueeze(0).expand(B, N, N).contiguous()
     elif not A.is_sparse and A.dim() == 3 and A.shape[0] == B:
         A_dense = A
+    elif not A.is_sparse and A.dim() == 2 and A.shape[0] == N:
+        A_dense = A.unsqueeze(0).expand(B, N, N).contiguous()
     else:
         raise ValueError("A must be either sparse (N,N) or dense (B,N,N)")
 

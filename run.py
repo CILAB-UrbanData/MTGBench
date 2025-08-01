@@ -36,6 +36,7 @@ if __name__ == '__main__':
 
     # Prediction task
     parser.add_argument('--pre_steps', type=int, default=6, help='the predictions time steps')
+    parser.add_argument('--seq_len', type=int, default=4, help='input sequence length')
 
     # model define
     '''MDTP's args'''
@@ -58,11 +59,18 @@ if __name__ == '__main__':
     parser.add_argument('--encoder_layers', type=int, default=3, help='number of layers in the model')
     parser.add_argument('--outChannel_1', type=int, default=16, help='output channel for the first convolution layer')
 
+    '''TrGNN's args'''
+    parser.add_argument('--demand_hop', type=int, default=75, help='GCN output feature size')
+    parser.add_argument('--status_hop', type=int, default=3, help='GCN input feature size')
+    parser.add_argument('--start_date', type=str, default='20080517')
+    parser.add_argument('--end_date', type=str, default='20080518')
+    parser.add_argument('--NumofRoads', type=int, default=19621)
+
     # optimization
     parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
     parser.add_argument('--itr', type=int, default=1, help='experiments times')
     parser.add_argument('--train_epochs', type=int, default=1, help='train epochs')
-    parser.add_argument('--batch_size', type=int, default=32, help='batch size of train input data')
+    parser.add_argument('--batch_size', type=int, default=2, help='batch size of train input data')
     parser.add_argument('--patience', type=int, default=20, help='early stopping patience')
     parser.add_argument('--learning_rate', type=float, default=0.0001, help='optimizer learning rate')
     parser.add_argument('--des', type=str, default='test', help='exp description')
@@ -79,11 +87,11 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    # wandb.init(
-    # project="Traffic-Benchmark",
-    # config=vars(args),
-    # dir=args.log_dir
-    # )
+    wandb.init(
+    project="Traffic-Benchmark",
+    config=vars(args),
+    dir=args.log_dir
+    )
 
     if torch.cuda.is_available() and args.use_gpu:
         args.device = torch.device('cuda:{}'.format(args.gpu))

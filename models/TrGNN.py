@@ -40,7 +40,7 @@ class ChannelFullyConnected(nn.Module):
     def forward(self, input):
         # input: (B, N, in_features)
         B, N, F = input.shape
-        out = (input * self.weight.unsqueeze(0).unsqueeze(0)).sum(dim=2)
+        out = (input * self.weight.unsqueeze(0)).sum(dim=2)
         if self.bias is not None:
             out = out + self.bias.unsqueeze(0)
         return out  # (B, N)
@@ -75,7 +75,7 @@ class ChannelAttention(nn.Module):
             init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input):
-        # input: (B, H, N, in_features)
+        # input: (B, H, N, in_features, 1)
         B, H, N, F = input.shape
         # expand weight to batch
         w = self.weight.unsqueeze(0).expand(B, -1, -1, -1)  # (B, N, F, out)
@@ -100,49 +100,58 @@ class ChannelAttention(nn.Module):
 class Model(nn.Module):
     # TrGNN.
     
-    def __init__(self, input_size=1, output_size=1, demand_hop=75, status_hop=3):
+    def __init__(self, args):
+        # demand_hop=75, status_hop=3
         super(Model, self).__init__()
         
-        self.input_size = input_size
-        self.output_size = output_size
-        self.demand_hop = demand_hop
-        self.status_hop = status_hop
+        self.args = args
+        self.demand_hop = args.demand_hop
+        self.status_hop = args.status_hop
         
         # attention
-        self.attention_layer = ChannelAttention(2**(status_hop+1)-1, demand_hop+1, channels=19621, bias=True) # channels=n_road
+        self.attention_layer = ChannelAttention(2*(args.status_hop+1)-1, args.demand_hop+1, channels=args.NumofRoads, bias=True) # channels=n_road
                 
         # linear output
-        self.output_layer = ChannelFullyConnected(in_features=4+24+1, channels=19621) # channels=n_road
+        self.output_layer = ChannelFullyConnected(in_features=4+24+1, channels=args.NumofRoads) # channels=n_road
 
         # other data stored here for convenience
-        _, _, self.W, self.W_norm = preprocess_data()
+        _, _, self.W, self.W_norm = preprocess_data(args.root_path, args.start_date, args.end_date)
+        self.W = self.W.to(args.device)
+        self.W_norm = self.W_norm.to(args.device)       
                
     def forward(self, input, W=None, h_init=None):
-        # X: graph signal. normalized. tensor: (history_window, n_road)
-        # T: trajectory transition. normalized. tuple of history_window sparse_tensors: (n_road, n_road)
+        # X: graph signal. normalized. tensor: (seq_len, n_road)
+        # T: trajectory transition. normalized. tuple of seq_len sparse_tensors: (n_road, n_road)
         # W: weighted road adjacency matrix. # sparse_tensor: (n_road, n_road)
         # h_init: for GRU. (gru_num_layers, n_road, hidden_size)
         # ToD: road-wise one-hot encoding of hour of day. (n_road, 24)
         # DoW: road-wise indicator. 1 for weekdays, 0 for weekends/PHs. (n_road, 1)
-        X, T, ToD, DoW = input['x'], input['T'], input['ToD'], input['DoW']
+        X, T, ToD, DoW = input['X'], input['T'], input['ToD'], input['DoW']
+
+        X = X.to(self.args.device)
+        T = T.to(self.args.device) 
+        ToD = ToD.to(self.args.device)
+        DoW = DoW.to(self.args.device)
+
         B, H, N = X.shape
         # demand propagation
-        H_list=[]
-        for t,A in enumerate(T):
-            Ht = graph_propagation_sparse_batch(X[:,t,:], A.transpose(0,1), hop=self.demand_hop)
+        H_list = []
+        for t in range(H):
+            A = T[:, t, :, :]  # (B, N, N)
+            Ht = graph_propagation_sparse_batch(X[:,t,:], A.transpose(1,2), hop=self.demand_hop)
             H_list.append(Ht.unsqueeze(1))  # (B,1,N,hop+1)
-        H = torch.cat(H_list, dim=1)  # (B,H,N,hop+1)
+        H_list = torch.cat(H_list, dim=1)  # (B,H,N,hop+1)
         # status propagation & attention
         S_list=[]
         for t in range(H):
             St = graph_propagation_sparse_batch(X[:,t,:], self.W_norm, hop=self.status_hop, dual=True)
             S_list.append(St.unsqueeze(1))
         S = torch.cat(S_list, dim=1)  # (B,H,N,1+2*status_hop)
-        att = self.attention_layer(S.unsqueeze(4))
+        att = self.attention_layer(S) # attr(B, H, N, demand_hop+1)
         att = F.softmax(att, dim=2)
-        H = (H * att).sum(dim=3)  # (B,H,N)
+        H_list = (H_list * att).sum(dim=3)  # (B,H,N)
         # combine features
-        H = torch.cat([H.permute(0,2,1), ToD, DoW], dim=2)  # (B,N,H+25)
+        H_list = torch.cat([H_list.permute(0,2,1), ToD, DoW], dim=2)  # (B,N,H+25)
         # output
-        Y = self.output_layer(H)  # (B,N)
+        Y = self.output_layer(H_list)  # (B,N)
         return Y

@@ -149,14 +149,14 @@ class Model(nn.Module):
         self.predictor  = Predictor(pred_steps=args.T1)
         self.device = args.device
         self.flow = os.path.join(args.root_path, 'sf_flow_100_trimmed.csv')
-        self.apply(self.__init_weights)  # 初始化权重
+        self.__init_weights()  # 初始化权重
 
     def __init_weights(self):
         """
         初始化权重
         """
         for m in self.modules():
-            if isinstance(m, nn.Linear):
+            if isinstance(m, nn.Linear) and not isinstance(m, nn.LazyLinear):
                 nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)

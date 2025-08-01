@@ -35,7 +35,8 @@ class ExpPrediction(Exp_Basic):
     def vali(self, data_set, data_loader, criterion):
         self.model.eval()
         total_loss = []
-        data_set.on_epoch_start()
+        if self.args.model == "Trajnet":
+            data_set.on_epoch_start()
         with torch.no_grad():
             for i, (inputs, target) in enumerate(data_loader):
                 target = target.to(self.args.device)
@@ -123,16 +124,18 @@ class ExpPrediction(Exp_Basic):
 
             print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
                 epoch + 1, train_steps, train_loss, vali_loss, test_loss))
-            wandb.log({
-                "train_loss": train_loss,
-                "vali_loss": vali_loss,
-                "test_loss": test_loss
-            })
+
             early_stopping(vali_loss, self.model, path)
             if early_stopping.early_stop:
                 print("Early stopping")
                 break
 
+            wandb.log({
+                "train_loss": train_loss,
+                "vali_loss": vali_loss,
+                "test_loss": test_loss
+            })
+            
             adjust_learning_rate(model_optim, epoch + 1, self.args)
 
             best_model_path = path + '/' + 'checkpoint.pth'
