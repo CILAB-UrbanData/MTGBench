@@ -34,7 +34,7 @@ args信息 ---- `Exp` ---> 根据信息实例化每个任务对应的Exp对象�
 # 目前以实现的方法和对应的Exp #
 exp_lstm(使用了lstm的交通预测任务，即lstm_based) ------- MDTP
 
-exp_prediction(没有使用lstm的较为通用的交通预测任务) ------- Trajnet
+exp_prediction(没有使用lstm的较为通用的交通预测任务) ------- Trajnet, TrGNN
 
 # 数据链接 #
 [百度网盘数据链接](https://pan.baidu.com/s/1s3VafVC22W18ktWrjqEaRg?pwd=ss52)
