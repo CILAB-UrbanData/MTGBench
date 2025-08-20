@@ -7,8 +7,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import math, wandb, time
 
-plt.switch_backend('agg')
-
+def ensure_dir(dir_path):
+    if not os.path.exists(dir_path):
+        os.makedirs(dir_path)
 
 def adjust_learning_rate(optimizer, epoch, args):
     # lr = args.learning_rate * (0.2 ** (epoch // 2))
@@ -72,18 +73,6 @@ class dotdict(dict):
     __getattr__ = dict.get
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
-
-
-class StandardScaler():
-    def __init__(self, mean, std):
-        self.mean = mean
-        self.std = std
-
-    def transform(self, data):
-        return (data - self.mean) / self.std
-
-    def inverse_transform(self, data):
-        return (data * self.std) + self.mean
 
 
 def visual(true, preds=None, name='./pic/test.pdf'):

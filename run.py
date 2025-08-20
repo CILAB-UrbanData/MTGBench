@@ -44,7 +44,7 @@ if __name__ == '__main__':
     parser.add_argument('--gcn_hidden', type=int, default=128, help='hidden dimension of GCN')
     parser.add_argument('--lstm_hidden', type=int, default=256, help='hidden dimension of LSTM')
     parser.add_argument('--fusion', type=str, default='sum', help='fusion method for traffic prediction, options:[sum, concat]')
-    parser.add_argument('--N_nodes', type=int, default=264, help='number of nodes in the graph')
+    parser.add_argument('--N_nodes', type=int, help='number of nodes in the graph')
     parser.add_argument('--num_layers', type=int, default=2, help='number of layers in the model')
     parser.add_argument('--grad_clip', type=float, default=5.0, help='gradient clipping value')
     parser.add_argument('--S', type=int, default=24, help='sequence length for traffic prediction')
@@ -70,12 +70,13 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
     parser.add_argument('--itr', type=int, default=1, help='experiments times')
     parser.add_argument('--train_epochs', type=int, default=1, help='train epochs')
-    parser.add_argument('--batch_size', type=int, default=2, help='batch size of train input data')
+    parser.add_argument('--batch_size', type=int, default=32, help='batch size of train input data')
     parser.add_argument('--patience', type=int, default=20, help='early stopping patience')
     parser.add_argument('--learning_rate', type=float, default=0.0001, help='optimizer learning rate')
     parser.add_argument('--des', type=str, default='test', help='exp description')
     parser.add_argument('--loss', type=str, default='L1', help='loss function')
     parser.add_argument('--lradj', type=str, default='type1', help='adjust learning rate')
+    parser.add_argument('--learner', type=str, default='adam', help='optimizer type')
     parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
 
     # GPU

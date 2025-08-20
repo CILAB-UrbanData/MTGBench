@@ -10,11 +10,11 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "args": ["--task_name", "TrafficPrediction", 
+            "args": ["--task_name", "TrafficLSTM", 
                      "--is_training", "0", 
-                     "--model", "Trajnet", 
-                     "--data", "Trajnet", 
-                     "--root_path", "data/sf_data/Trajnet/processed"]
+                     "--model", "MDTP", 
+                     "--data", "MDTP", 
+                     "--root_path", "./data/NYC_Taxi&Bike/MDTP/processed"]
         }
     ]
 }

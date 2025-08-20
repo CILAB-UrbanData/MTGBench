@@ -1,14 +1,17 @@
-from data_provider.data_loader import MDTPRawloader, SF20_forTrajnet_Dataset, SF20_forTrGNN_Dataset
+from data_provider.data_loader import MDTPRawloader, SF20_forTrajnet_Dataset, SF20_forTrGNN_Dataset, GaiyaForMDTP
+from utils.TRACK_wrapper_trllm_cont import TSLibDatasetWrapper
 from torch.utils.data import DataLoader, Subset
 import random
 
 data_dict = {
     'MDTP': MDTPRawloader,
+    'GaiyaForMDTP': GaiyaForMDTP,
     'Trajnet': SF20_forTrajnet_Dataset,
-    'TrGNN': SF20_forTrGNN_Dataset
+    'TrGNN': SF20_forTrGNN_Dataset,
+    'TRACK_trllm_cont': TSLibDatasetWrapper
 }
 
-def data_provider(args, flag):
+def data_provider(args, flag='train'):
     Data = data_dict[args.data]
 
     shuffle_flag = False if (flag == 'test' or flag == 'TEST') else True
@@ -16,7 +19,7 @@ def data_provider(args, flag):
     batch_size = args.batch_size
 
     if args.task_name ==  'TrafficLSTM':
-        if args.data == 'MDTP':
+        if args.data == 'MDTP' or args.data == 'GaiyaForMDTP':
             drop_last = True
             shuffle_flag = False
         data_set = Data(
@@ -34,6 +37,7 @@ def data_provider(args, flag):
             num_workers=args.num_workers,
             drop_last=drop_last)
         return data_set, data_loader
+
     elif args.task_name == 'TrafficPrediction':
         if args.data == 'Trajnet':
             drop_last = False
@@ -43,6 +47,7 @@ def data_provider(args, flag):
                 flag=flag,            
                 root_path=args.root_path,
             )
+
         elif args.data == 'TrGNN':
             drop_last = False
             shuffle_flag = True
@@ -62,3 +67,10 @@ def data_provider(args, flag):
             drop_last=drop_last,
             collate_fn=data_set.collate_fn)
         return data_set, data_loader
+
+    elif args.task_name == 'TRACK_trllm_cont':
+        if args.data == 'TRACK_Gaiya':
+            data_set = Data(args)
+            train_loader, eval_loader, test_loader = data_set.get_data()
+            data_feature = data_set.get_data_feature()
+        return data_set, train_loader, eval_loader, test_loader, data_feature

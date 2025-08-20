@@ -92,5 +92,5 @@ class Model(nn.Module):
         # 两层全连接预测
         x1 = torch.relu(self.fc1(H))                           # [B, N, fusion_dim//2]
         x2 = torch.cat([x1, H], dim=-1)                        # [B, N, fusion_dim//2 + fusion_dim]
-        pred = self.fc2(x2)                                    # [B, N, 2]
+        pred = self.fc2(x2)                                    # [B, N, 4]
         return pred, (state_taxi, state_bike)  # 每个节点的 [in_pred, out_pred]

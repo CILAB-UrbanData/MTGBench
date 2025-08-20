@@ -22,8 +22,22 @@ class ExpPrediction(Exp_Basic):
         return data_set, data_loader
     
     def _select_optimizer(self):
-        model_optim = torch.optim.Adam(self.model.parameters(), lr=self.args.learning_rate)
-        return model_optim
+        if self.args.learner.lower() == 'adam':
+            optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.learning_rate)                                        
+        elif self.args.learner.lower() == 'sgd':
+            optimizer = torch.optim.SGD(self.model.parameters(), lr=self.args.learning_rate)  
+        elif self.args.learner.lower() == 'adagrad':
+            optimizer = torch.optim.Adagrad(self.model.parameters(), lr=self.args.learning_rate)  
+        elif self.args.learner.lower() == 'rmsprop':
+            optimizer = torch.optim.RMSprop(self.model.parameters(), lr=self.args.learning_rate)  
+        elif self.args.learner.lower() == 'sparse_adam':
+            optimizer = torch.optim.SparseAdam(self.model.parameters(), lr=self.args.learning_rate)  
+        elif self.args.learner.lower() == 'adamw':
+            optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.args.learning_rate)  
+        else:
+            self._logger.warning('Received unrecognized optimizer, set default Adam optimizer')
+            optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.learning_rate)  
+        return optimizer
 
     def _select_criterion(self):
         if self.args.model == "Trajnet":
@@ -72,7 +86,7 @@ class ExpPrediction(Exp_Basic):
         criterion = self._select_criterion()
 
         if self.args.use_amp:
-            scaler = torch.cuda.amp.GradScaler()
+            scaler = torch.amp.GradScaler()
         
         for epoch in range(self.args.train_epochs):
             iter_count = 0
@@ -90,7 +104,7 @@ class ExpPrediction(Exp_Basic):
                 target = target.to(self.args.device)
 
                 if self.args.use_amp:
-                    with torch.cuda.amp.autocast():
+                    with torch.amp.autocast():
                         outputs = self.model(inputs)
                         loss = criterion(outputs, target)
                         train_loss.append(loss.item())
@@ -138,10 +152,9 @@ class ExpPrediction(Exp_Basic):
             
             adjust_learning_rate(model_optim, epoch + 1, self.args)
 
-            best_model_path = path + '/' + 'checkpoint.pth'
-            self.model.load_state_dict(torch.load(best_model_path))
-
-            return self.model
+        best_model_path = path + '/' + 'checkpoint.pth'
+        self.model.load_state_dict(torch.load(best_model_path))
+        return self.model
         
     def test(self, setting, test=0):
         test_data, test_loader = self._get_data(flag='test')
