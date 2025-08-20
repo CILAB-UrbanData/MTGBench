@@ -33,6 +33,25 @@ class Model(nn.Module):
         self.fc2 = nn.Linear(fusion_dim // 2 + fusion_dim, 4) #输出为预测的bike和taxi各自的in out
         # 权重初始化
         self.apply(self._init_weights)
+        # 隐变量初始化
+        self.state_taxi = None
+        self.state_bike = None
+        self.args = args
+    
+    def reset_state(self):
+        self.state_taxi = None
+        self.state_bike = None
+
+    def _init_state(self, batch_size):
+        h = torch.zeros(2, batch_size * self.args.N_nodes, self.args.lstm_hidden).to(self.args.device) #2表示有两层隐变量
+        c = torch.zeros(2, batch_size * self.args.N_nodes, self.args.lstm_hidden).to(self.args.device)
+        return (h, c)
+
+    def _detach_state(self, state):
+        if state is None:
+            return None
+        h, c = state
+        return (h.detach(), c.detach())
 
     def _init_weights(self, module):
         """
@@ -78,10 +97,23 @@ class Model(nn.Module):
         h_last = h_n[-1].reshape(B, N, -1)       # [B,N,hidden]
         return h_last, new_state
     
-    def forward(self, taxi_seq, bike_seq, A_taxi, A_bike, state_taxi, state_bike):
+    def forward(self, input):
         # 分别得出租车 & 单车分支输出
-        h_taxi, state_taxi = self.forward_branch(taxi_seq, A_taxi, self.gcn_taxi, self.lstm_taxi, state_taxi)
-        h_bike, state_bike = self.forward_branch(bike_seq, A_bike, self.gcn_bike, self.lstm_bike, state_bike)
+        taxi_seq, bike_seq, A_taxi, A_bike = input
+
+        taxi_seq = taxi_seq.to(self.args.device)  # [B, S, N, F]
+        bike_seq = bike_seq.to(self.args.device)  # [B, S, N, F]
+        A_taxi = A_taxi.to(self.args.device)  # [B, S, N, N]
+        A_bike = A_bike.to(self.args.device)  # [B, S, N, N]
+
+        B = self.args.batch_size
+
+        if self.state_taxi is None:
+            self.state_taxi = self._init_state(batch_size=B)
+            self.state_bike = self._init_state(batch_size=B)
+
+        h_taxi, self.state_taxi = self.forward_branch(taxi_seq, A_taxi, self.gcn_taxi, self.lstm_taxi, self.state_taxi)
+        h_bike, self.state_bike = self.forward_branch(bike_seq, A_bike, self.gcn_bike, self.lstm_bike, self.state_bike)
 
         # 融合两源特征：相加 or 拼接
         if self.fusion == 'sum':
@@ -93,4 +125,9 @@ class Model(nn.Module):
         x1 = torch.relu(self.fc1(H))                           # [B, N, fusion_dim//2]
         x2 = torch.cat([x1, H], dim=-1)                        # [B, N, fusion_dim//2 + fusion_dim]
         pred = self.fc2(x2)                                    # [B, N, 4]
-        return pred, (state_taxi, state_bike)  # 每个节点的 [in_pred, out_pred]
+
+        self.state_taxi = self._detach_state(self.state_taxi)
+        self.state_bike = self._detach_state(self.state_bike)
+
+
+        return pred  # 每个节点的 [in_pred, out_pred]

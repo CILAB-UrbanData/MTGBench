@@ -52,13 +52,27 @@ class MDTPRawloader(Dataset):
         return len(self.X_taxi) - self.S
     
     def __getitem__(self, idx):
-        taxi_seq = self.X_taxi[idx:idx+self.S]
-        bike_seq = self.X_bike[idx:idx+self.S]
-        A_taxi_seq = self.A_taxi[idx:idx+self.S]
-        A_bike_seq = self.A_bike[idx:idx+self.S]
-        label_taxi = self.Y_taxi[idx+self.S]
-        label_bike = self.Y_bike[idx+self.S]
+        taxi_seq = torch.tensor(self.X_taxi[idx:idx+self.S], dtype=torch.float32)
+        bike_seq = torch.tensor(self.X_bike[idx:idx+self.S], dtype=torch.float32)
+        A_taxi_seq = torch.tensor(self.A_taxi[idx:idx+self.S], dtype=torch.float32)
+        A_bike_seq = torch.tensor(self.A_bike[idx:idx+self.S], dtype=torch.float32)
+        label_taxi = torch.tensor(self.Y_taxi[idx+self.S], dtype=torch.float32)
+        label_bike = torch.tensor(self.Y_bike[idx+self.S], dtype=torch.float32)
         return taxi_seq, bike_seq, A_taxi_seq, A_bike_seq, label_taxi, label_bike
+    
+    def collate_fn(self, batch):
+        taxi_seq, bike_seq, A_taxi, A_bike, y_taxi, y_bike = zip(*batch)
+        taxi_seq = torch.stack(taxi_seq)
+        bike_seq = torch.stack(bike_seq)
+        A_taxi   = torch.stack(A_taxi)
+        A_bike   = torch.stack(A_bike)
+        y_taxi   = torch.stack(y_taxi)
+        y_bike   = torch.stack(y_bike)
+
+        # 这里自动拼接 target
+        target = torch.cat([y_taxi, y_bike], dim=-1)
+
+        return (taxi_seq, bike_seq, A_taxi, A_bike), target
 
 class GaiyaForMDTP(Dataset):
     def __init__(self, args, root_path, flag, normalization=True, S=24):
@@ -95,10 +109,18 @@ class GaiyaForMDTP(Dataset):
         return len(self.X_taxi) - self.S
     
     def __getitem__(self, idx):
-        taxi_seq = self.X_taxi[idx:idx+self.S]
-        A_taxi_seq = self.A_taxi[idx:idx+self.S]
-        label_taxi = self.Y_taxi[idx+self.S]
+        taxi_seq = torch.tensor(self.X_taxi[idx:idx+self.S], dtype=torch.float32)
+        A_taxi_seq = torch.tensor(self.A_taxi[idx:idx+self.S], dtype=torch.float32)
+        label_taxi = torch.tensor(self.Y_taxi[idx+self.S], dtype=torch.float32)
         return taxi_seq, A_taxi_seq, label_taxi
+    
+    def collate_fn(self, batch):
+        taxi_seq, A_taxi, y_taxi = zip(*batch)
+        taxi_seq = torch.stack(taxi_seq)
+        A_taxi   = torch.stack(A_taxi)
+        target   = torch.stack(y_taxi)
+
+        return (taxi_seq, A_taxi), target
 
 # SF20_forTrajnet_Dataset
 class TrieNode:

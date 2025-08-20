@@ -31,6 +31,23 @@ class Model(nn.Module):
         self.fc2 = nn.Linear(fusion_dim, 2) #输出为预测的taxi的in out
         # 权重初始化
         self.apply(self._init_weights)
+        # 隐变量初始化
+        self.state_taxi = None
+        self.args = args
+    
+    def reset_state(self):
+        self.state_taxi = None
+
+    def _init_state(self, batch_size):
+        h = torch.zeros(2, batch_size * self.args.N_nodes, self.args.lstm_hidden).to(self.args.device) #2表示有两层隐变量，2层是按照原论文来的
+        c = torch.zeros(2, batch_size * self.args.N_nodes, self.args.lstm_hidden).to(self.args.device)
+        return (h, c)
+
+    def _detach_state(self, state):
+        if state is None:
+            return None
+        h, c = state
+        return (h.detach(), c.detach())
 
     def _init_weights(self, module):
         """
@@ -76,12 +93,22 @@ class Model(nn.Module):
         h_last = h_n[-1].reshape(B, N, -1)       # [B,N,hidden]
         return h_last, new_state
     
-    def forward(self, taxi_seq, A_taxi, state_taxi):
+    def forward(self, input):
+        taxi_seq, A_taxi = input
+
+        taxi_seq = taxi_seq.to(self.args.device)  # [B, S, N
+        A_taxi = A_taxi.to(self.args.device)
+
+        B = self.args.batch_size
+
+        if self.state_taxi is None:
+            self.state_taxi = self._init_state(batch_size=B)
         # 分别得出租车 & 单车分支输出
-        h_taxi, state_taxi = self.forward_branch(taxi_seq, A_taxi, self.gcn_taxi, self.lstm_taxi, state_taxi)
+        h_taxi, self.state_taxi = self.forward_branch(taxi_seq, A_taxi, self.gcn_taxi, self.lstm_taxi, self.state_taxi)
         
         H = h_taxi
         # 两层全连接预测
         x1 = torch.relu(self.fc1(H))                           # [B, N, fusion_dim]
         pred = self.fc2(x1)                                    # [B, N, 2]
-        return pred, state_taxi # 每个节点的 [in_pred, out_pred]
+        self.state_taxi = self._detach_state(self.state_taxi)
+        return pred # 每个节点的 [in_pred, out_pred]

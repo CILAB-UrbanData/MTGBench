@@ -97,6 +97,9 @@ class ExpPrediction(Exp_Basic):
             if self.args.model == "Trajnet":
                 train_data.on_epoch_start() #Trajnet比较特殊，需要在每个epoch下手动shuffle一下，可能后面修改接口后可以改善
 
+            if hasattr(self.model, "reset_state"):
+                self.model.reset_state()
+
             for i, (inputs, target) in enumerate(train_loader):
                 iter_count += 1
                 model_optim.zero_grad()
@@ -174,12 +177,21 @@ class ExpPrediction(Exp_Basic):
                 targets = targets.to(self.args.device)
                 # 前向并更新 hidden state
                 if self.args.use_amp:
-                    with torch.cuda.amp.autocast():
+                    with torch.amp.autocast():
                         pred = self.model(inputs)                       
                 else:   
-                    pred = self.model(inputs)                  
-                pred = pred.cpu().numpy().reshape(-1, self.args.pre_steps)
-                true = targets.cpu().numpy().reshape(-1, self.args.pre_steps)
+                    pred = self.model(inputs) 
+                    
+                if self.args.model == 'MDTP':   
+                    pred = pred.cpu().numpy().reshape(-1, 4)
+                    true = targets.cpu().numpy().reshape(-1, 4)     
+                elif self.args.model == 'MDTPmini':    
+                    pred = pred.cpu().numpy().reshape(-1, 2)
+                    true = targets.cpu().numpy().reshape(-1, 2)     
+                else:                     
+                    pred = pred.cpu().numpy().reshape(-1, self.args.pre_steps)
+                    true = targets.cpu().numpy().reshape(-1, self.args.pre_steps)
+
                 y_preds.append(pred)
                 y_trues.append(true)
                 

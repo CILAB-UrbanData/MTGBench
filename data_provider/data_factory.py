@@ -35,7 +35,8 @@ def data_provider(args, flag='train'):
             batch_size=batch_size,
             shuffle=shuffle_flag,
             num_workers=args.num_workers,
-            drop_last=drop_last)
+            drop_last=drop_last,
+            collate_fn=data_set.collate_fn if args.data == 'MDTP' or args.data == 'GaiyaForMDTP' else None)
         return data_set, data_loader
 
     elif args.task_name == 'TrafficPrediction':
@@ -58,6 +59,18 @@ def data_provider(args, flag='train'):
                 end_date = args.end_date,
                 root_path = args.root_path
             )
+        
+        elif args.data == 'MDTP' or args.data == 'GaiyaForMDTP':
+            drop_last = True
+            shuffle_flag = False
+            data_set = Data(
+                args = args,
+                root_path=args.root_path,
+                flag=flag,
+                normalization=args.normalization,
+                S=args.S
+            )
+
         print(flag, len(data_set))
         data_loader = DataLoader(
             data_set,
@@ -65,7 +78,7 @@ def data_provider(args, flag='train'):
             shuffle=shuffle_flag,
             num_workers=0,
             drop_last=drop_last,
-            collate_fn=data_set.collate_fn)
+            collate_fn=data_set.collate_fn if hasattr(data_set, 'collate_fn') else None)
         return data_set, data_loader
 
     elif args.task_name == 'TRACK_trllm_cont':

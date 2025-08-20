@@ -113,22 +113,21 @@ if __name__ == '__main__':
     print('Args in experiment:')
     print_args(args)
 
-    if args.task_name == 'TrafficLSTM':
-        Exp = ExpLSTM
-    elif args.task_name == 'TrafficPrediction':
+    if args.task_name == 'TrafficPrediction':
         Exp = ExpPrediction
 
     if args.is_training:
         for ii in range(args.itr):
             # setting record of experiments
             exp = Exp(args)  # set experiments
-            setting = '{}_{}_{}_{}_lr_{}_ba_{}'.format(
+            setting = '{}_{}_{}_{}_lr_{}_ba_{}_epo_{}'.format(
                 args.task_name,
                 args.model_id,
                 args.model,
                 args.data,
                 args.learning_rate,
                 args.batch_size,
+                args.train_epochs,
                 ii)
 
             print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
@@ -143,13 +142,14 @@ if __name__ == '__main__':
     else:
         exp = Exp(args)  # set experiments
         ii = 0
-        setting = '{}_{}_{}_{}_lr_{}_ba_{}'.format(
+        setting = '{}_{}_{}_{}_lr_{}_ba_{}_epo_{}'.format(
             args.task_name,
             args.model_id,
             args.model,
             args.data,
             args.learning_rate,
             args.batch_size,
+            args.train_epochs,
             ii)
 
         print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
