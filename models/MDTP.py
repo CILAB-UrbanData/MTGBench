@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from layers.Gcn_Related import gcn_norm
+from layers.lstm_init import init_state
 
 class GraphConv(nn.Module):
     def __init__(self, in_feats, out_feats):
@@ -42,10 +43,8 @@ class Model(nn.Module):
         self.state_taxi = None
         self.state_bike = None
 
-    def _init_state(self, batch_size):
-        h = torch.zeros(2, batch_size * self.args.N_nodes, self.args.lstm_hidden).to(self.args.device) #2表示有两层隐变量
-        c = torch.zeros(2, batch_size * self.args.N_nodes, self.args.lstm_hidden).to(self.args.device)
-        return (h, c)
+    def _init_state(self):
+        return init_state(self.args)
 
     def _detach_state(self, state):
         if state is None:
@@ -106,11 +105,9 @@ class Model(nn.Module):
         A_taxi = A_taxi.to(self.args.device)  # [B, S, N, N]
         A_bike = A_bike.to(self.args.device)  # [B, S, N, N]
 
-        B = self.args.batch_size
-
         if self.state_taxi is None:
-            self.state_taxi = self._init_state(batch_size=B)
-            self.state_bike = self._init_state(batch_size=B)
+            self.state_taxi = self._init_state()
+            self.state_bike = self._init_state()
 
         h_taxi, self.state_taxi = self.forward_branch(taxi_seq, A_taxi, self.gcn_taxi, self.lstm_taxi, self.state_taxi)
         h_bike, self.state_bike = self.forward_branch(bike_seq, A_bike, self.gcn_bike, self.lstm_bike, self.state_bike)

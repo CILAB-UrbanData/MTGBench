@@ -2,7 +2,6 @@ import argparse
 import os
 import torch
 import torch.backends
-from exp.exp_lstm import ExpLSTM
 from exp.exp_prediction import ExpPrediction
 from utils.print_args import print_args
 import random, wandb

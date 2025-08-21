@@ -40,7 +40,7 @@ class ExpPrediction(Exp_Basic):
         return optimizer
 
     def _select_criterion(self):
-        if self.args.model == "Trajnet":
+        if self.args.model == "Trajnet" or self.args.model == "MDTP" or self.args.model == "MDTPmini":
             criterion = nn.L1Loss()
         else:
             criterion = nn.MSELoss()
@@ -49,14 +49,17 @@ class ExpPrediction(Exp_Basic):
     def vali(self, data_set, data_loader, criterion):
         self.model.eval()
         total_loss = []
+
         if self.args.model == "Trajnet":
             data_set.on_epoch_start()
+        if hasattr(self.model, "reset_state"):
+            self.model.reset_state()
+
         with torch.no_grad():
             for i, (inputs, target) in enumerate(data_loader):
                 target = target.to(self.args.device)
-
                 if self.args.use_amp:
-                    with torch.cuda.amp.autocast():
+                    with torch.amp.autocast():
                         outputs = self.model(inputs)
                         loss = criterion(outputs, target)
                         total_loss.append(loss.item())
@@ -64,7 +67,6 @@ class ExpPrediction(Exp_Basic):
                     outputs = self.model(inputs)
                     loss = criterion(outputs, target)
                     total_loss.append(loss.item())
-        
         avg_loss = np.mean(total_loss)
         print(f'Validation Loss: {avg_loss:.7f}')
         return avg_loss
@@ -173,6 +175,8 @@ class ExpPrediction(Exp_Basic):
 
         y_trues, y_preds = [], []
         with torch.no_grad():
+            if hasattr(self.model, "reset_state"):
+                self.model.reset_state()
             for inputs, targets in test_loader:
                 targets = targets.to(self.args.device)
                 # 前向并更新 hidden state

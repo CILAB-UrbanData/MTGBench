@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from layers.Gcn_Related import gcn_norm
+from layers.lstm_init import init_state
 
 class GraphConv(nn.Module):
     def __init__(self, in_feats, out_feats):
@@ -38,10 +39,8 @@ class Model(nn.Module):
     def reset_state(self):
         self.state_taxi = None
 
-    def _init_state(self, batch_size):
-        h = torch.zeros(2, batch_size * self.args.N_nodes, self.args.lstm_hidden).to(self.args.device) #2表示有两层隐变量，2层是按照原论文来的
-        c = torch.zeros(2, batch_size * self.args.N_nodes, self.args.lstm_hidden).to(self.args.device)
-        return (h, c)
+    def _init_state(self):
+        return init_state(self.args)
 
     def _detach_state(self, state):
         if state is None:
@@ -99,10 +98,8 @@ class Model(nn.Module):
         taxi_seq = taxi_seq.to(self.args.device)  # [B, S, N
         A_taxi = A_taxi.to(self.args.device)
 
-        B = self.args.batch_size
-
         if self.state_taxi is None:
-            self.state_taxi = self._init_state(batch_size=B)
+            self.state_taxi = self._init_state()
         # 分别得出租车 & 单车分支输出
         h_taxi, self.state_taxi = self.forward_branch(taxi_seq, A_taxi, self.gcn_taxi, self.lstm_taxi, self.state_taxi)
         
