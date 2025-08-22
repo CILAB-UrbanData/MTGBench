@@ -12,7 +12,7 @@ python -u run.py \
   --learning_rate 0.0001 \
   --batch_size 32 \
   --lradj 'type4' \
-  --N_nodes 264 \
+  --N_regions 264 \
   --itr 10 \
   --train_epochs 200 \
   --patience 20 \

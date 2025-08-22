@@ -3,7 +3,7 @@ import torch
 # 对 taxi 和 bike 两个分支分别做
 def init_state(args):  # 返回 (h0, c0)
     num_layers = args.num_layers  # LSTM 层数
-    B = args.batch_size * args.N_nodes  # B*N
+    B = args.batch_size * args.N_regions  # B*N
     H = args.lstm_hidden
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
     # h,c: [num_layers, B*N, H]

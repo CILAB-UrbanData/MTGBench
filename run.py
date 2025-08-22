@@ -43,7 +43,7 @@ if __name__ == '__main__':
     parser.add_argument('--gcn_hidden', type=int, default=128, help='hidden dimension of GCN')
     parser.add_argument('--lstm_hidden', type=int, default=256, help='hidden dimension of LSTM')
     parser.add_argument('--fusion', type=str, default='sum', help='fusion method for traffic prediction, options:[sum, concat]')
-    parser.add_argument('--N_nodes', type=int, help='number of nodes in the graph')
+    parser.add_argument('--N_regions', type=int, help='number of nodes in the graph')
     parser.add_argument('--num_layers', type=int, default=2, help='number of layers in the model')
     parser.add_argument('--grad_clip', type=float, default=5.0, help='gradient clipping value')
     parser.add_argument('--S', type=int, default=24, help='sequence length for traffic prediction')

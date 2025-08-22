@@ -13,7 +13,7 @@ def print_args(args):
         print("\033[1m" + "Model Parameters" + "\033[0m")
         print(f'  {"In Feats:":<20}{args.in_feats:<20}{"Gcn Hidden:":<20}{args.gcn_hidden:<20}')
         print(f'  {"Lstm Hidden:":<20}{args.lstm_hidden:<20}{"Fusion:":<20}{args.fusion:<20}')
-        print(f'  {"N Nodes:":<20}{args.N_nodes:<20}{"Num Layers:":<20}{args.num_layers:<20}')
+        print(f'  {"N Nodes:":<20}{args.N_regions:<20}{"Num Layers:":<20}{args.num_layers:<20}')
         print(f'  {"GradClip:":<20}{args.grad_clip:<20}{"Dropout:":<20}{args.dropout:<20}')
         print(f'  {"S:":<20}{args.S:<20}')
         print()
