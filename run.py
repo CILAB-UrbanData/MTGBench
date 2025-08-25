@@ -119,7 +119,7 @@ if __name__ == '__main__':
         for ii in range(args.itr):
             # setting record of experiments
             exp = Exp(args)  # set experiments
-            setting = '{}_{}_{}_{}_lr_{}_ba_{}_epo_{}'.format(
+            setting = '{}_{}_{}_{}_lr_{}_ba_{}_epo_{}_itr_{}'.format(
                 args.task_name,
                 args.model_id,
                 args.model,
@@ -141,7 +141,7 @@ if __name__ == '__main__':
     else:
         exp = Exp(args)  # set experiments
         ii = 0
-        setting = '{}_{}_{}_{}_lr_{}_ba_{}_epo_{}'.format(
+        setting = '{}_{}_{}_{}_lr_{}_ba_{}_epo_{}_itr_{}'.format(
             args.task_name,
             args.model_id,
             args.model,
