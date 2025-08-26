@@ -14,4 +14,4 @@ python -u run.py \
   --lradj 'type5' \
   --itr 1 \
   --train_epochs 100 \
-  --patience 50
+  --patience 20

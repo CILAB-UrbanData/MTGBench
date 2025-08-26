@@ -182,11 +182,53 @@ class SF20_forTrajnet_Dataset(Dataset):
         # 加载并过滤 flow 数据
         flow = pd.read_csv(os.path.join(self.root_path, flow_path), header=0)
         flow['index'] = pd.to_datetime(flow['index'])
-        begin_time = pd.to_datetime('2008-05-31 03:50:00', format='%Y-%m-%d %H:%M:%S')
-        end_time = pd.to_datetime('2008-06-10 02:10:00', format='%Y-%m-%d %H:%M:%S')
-        self.flow = flow[(flow['index'] > begin_time) & (flow['index'] <= end_time)].set_index('index')
+        self.flow = flow
 
         self.on_epoch_start()  # 预生成样本
+
+    def load_flow_data(self, T, T1=6, T2=2, T3=2):
+        """
+        和 Model 里的版本一致，只不过直接用 self.flow
+        """
+        flow = self.flow
+        recent = flow[
+            (flow['index'] >= T - pd.Timedelta(minutes=T1 * 10)) &
+            (flow['index'] < T)
+        ]
+        
+        daily = flow[
+            (flow['index'] >= T - pd.Timedelta(days=T2) - pd.Timedelta(minutes=T1 * 10)) &
+            (flow['index'] < T - pd.Timedelta(days=T2))
+        ]
+        T2 -= 1
+        while T2 > 0:
+            daily_part = flow[
+                (flow['index'] >= T - pd.Timedelta(days=T2) - pd.Timedelta(minutes=T1 * 10)) &
+                (flow['index'] < T - pd.Timedelta(days=T2))
+            ]
+            daily = pd.concat([daily, daily_part], ignore_index=True)
+            T2 -= 1
+
+        weekly = flow[
+            (flow['index'] >= T - pd.Timedelta(weeks=T3) - pd.Timedelta(minutes=T1 * 10)) &
+            (flow['index'] < T - pd.Timedelta(weeks=T3))
+        ]
+        T3 -= 1
+        while T3 > 0:
+            weekly_part = flow[
+                (flow['index'] >= T - pd.Timedelta(weeks=T3) - pd.Timedelta(minutes=T1 * 10)) &
+                (flow['index'] < T - pd.Timedelta(weeks=T3))
+            ]
+            weekly = pd.concat([weekly, weekly_part], ignore_index=True)
+            T3 -= 1
+
+        # 去掉 datetime 列
+        value_cols = [col for col in flow.columns if flow[col].dtype != 'datetime64[ns]']
+        recent = torch.from_numpy(recent[value_cols].values.astype(np.float32)).T
+        daily  = torch.from_numpy(daily[value_cols].values.astype(np.float32)).T
+        weekly = torch.from_numpy(weekly[value_cols].values.astype(np.float32)).T
+
+        return recent, daily, weekly
 
     def __len__(self):
         return len(self.samples)
@@ -245,14 +287,29 @@ class SF20_forTrajnet_Dataset(Dataset):
             targets.append(torch.stack(aggregated_targets, dim=0))
         targets_tensor = torch.stack(targets, dim=0)  
 
+        T_start_time = str(pd.to_datetime('2008-05-31 04:00', format='%Y-%m-%d %H:%M') + pd.Timedelta(minutes=T_start * 10))
+        timerange = pd.date_range(T_start_time, '2008-06-10 01:10', freq='6000min')
+
+        recents, dailys, weeklys = [], [], []
+        for t in timerange:
+            recent, daily, weekly = self.load_flow_data(T=t)
+            recents.append(recent.unsqueeze(1))
+            dailys.append(daily.unsqueeze(1))
+            weeklys.append(weekly.unsqueeze(1))
+
+        recents  = torch.stack(recents, dim=0)   # [time, N, 1, T*]
+        dailys   = torch.stack(dailys, dim=0)
+        weeklys  = torch.stack(weeklys, dim=0)
+
         inputs = {
             'segments': segments_tensor,
             'paths': padded,
-            'forest': forest
+            'forest': forest,
+            'recent': recents,
+            'daily': dailys,
+            'weekly': weeklys
         }
-        inputs = forest
-        
-        return (inputs, T_start), targets_tensor
+        return inputs, targets_tensor
 
 # SF20_forTrGNN_Dataset
 class SF20_forTrGNN_Dataset(Dataset):

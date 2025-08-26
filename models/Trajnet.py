@@ -214,21 +214,23 @@ class Model(nn.Module):
             torch.from_numpy(weekly.values.astype(np.float32)).T
         )   
 
-    def forward(self, input):
+    def forward(self, inputs):
         # recent/daily/weekly: [N, 1, T*], trajectories: [B, num_trajs, traj_len]
+        forests = inputs['forest']
+        recents = inputs['recent'].to(self.device)   # [time, N, 1, T*]
+        dailys  = inputs['daily'].to(self.device)
+        weeklys = inputs['weekly'].to(self.device)
+
         prediction = []
-        forests = input[0]
-        T_start = input[1]
-        T_start = str(pd.to_datetime('2008-05-31 04:00', format='%Y-%m-%d %H:%M') + pd.Timedelta(minutes=T_start * 10))
-        timerange = pd.date_range(T_start, '2008-06-10 01:10', freq='6000min') #每个batch从所有flow中抽样训练
-        for t in timerange:
-            recent, daily, weekly = self.load_flow_data(T=t)
-            recent = recent.unsqueeze(1).to(self.device)
-            daily = daily.unsqueeze(1).to(self.device)
-            weekly = weekly.unsqueeze(1).to(self.device)
-            features   = self.encoder(recent, daily, weekly)  # [N, C, L]
-            A_matrix  = self.attention(features)
-            segments, z_end = self.propagator(features, forests, A_matrix)  # [B, N, C]
+        for t in range(recents.shape[0]):  # 遍历 timerange
+            recent  = recents[t]
+            daily   = dailys[t]
+            weekly  = weeklys[t]
+
+            features = self.encoder(recent, daily, weekly)  # [N, C, L]
+            A_matrix = self.attention(features)
+            segments, z_end = self.propagator(features, forests, A_matrix)
             prediction.append(self.predictor(z_end))
-        prediction = torch.stack(prediction, dim=0) 
+
+        prediction = torch.stack(prediction, dim=0)
         return prediction

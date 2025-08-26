@@ -33,7 +33,7 @@ class SpatialAttention(nn.Module):
 
     def forward(self, H_prime):
         # H_prime: [n_s, C, n_h]
-        #把 [n_s, C, n_h] -> [n_s, n_h, C] [26659, 30, 16]
+        #把 [n_s, C, n_h] -> [n_s, n_h, C] [5000, 30, 16]
         H = H_prime.permute(0, 2, 1)
 
         # H′ w1 -> [n_s, n_h]，再乘 W2 -> [n_s, C]
