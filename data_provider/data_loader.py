@@ -278,8 +278,8 @@ class SF20_forTrajnet_Dataset(Dataset):
         # 最终的 targets 要按照 forward() 输出顺序一致：去重后保序
         unique_segments = list(dict.fromkeys(segments))  # 去重且保持顺序
         targets = []
-        T_start = random.randint(0, 599)  # 随机起始点
-        for t in range(T_start, 1424, 600): # 每600分钟一个时间段,1424为总共时间段数
+        T_start = random.randint(0, 59)  # 随机起始点
+        for t in range(T_start, 1424, 60): # 每60分钟一个时间段,1424为总共时间段数
             aggregated_targets = []
             for seg in unique_segments:
                 t_list = segment2targets[seg][0]
@@ -288,7 +288,7 @@ class SF20_forTrajnet_Dataset(Dataset):
         targets_tensor = torch.stack(targets, dim=0)  
 
         T_start_time = str(pd.to_datetime('2008-05-31 04:00', format='%Y-%m-%d %H:%M') + pd.Timedelta(minutes=T_start * 10))
-        timerange = pd.date_range(T_start_time, '2008-06-10 01:10', freq='6000min')
+        timerange = pd.date_range(T_start_time, '2008-06-10 01:10', freq='600min')
 
         recents, dailys, weeklys = [], [], []
         for t in timerange:

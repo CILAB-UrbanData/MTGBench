@@ -164,56 +164,7 @@ class Model(nn.Module):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
-
-    def load_flow_data(self, T='2008-06-08 10:30:00', T1=6, T2=2, T3=2):
-        """
-        加载流量数据, 用于时间卷积
-        """
-        flow = pd.read_csv(self.flow, header=0)
-        flow['index'] = pd.to_datetime(flow['index'])
-        T = pd.to_datetime(T, format='%Y-%m-%d %H:%M:%S')
-        
-        recent = flow[
-                    (flow['index'] >= T - pd.Timedelta(minutes=T1 * 10)) & 
-                    (flow['index'] < T)]
-        
-        daily =  flow[
-                    (flow['index'] >= T - pd.Timedelta(days=T2) - pd.Timedelta(minutes=T1 * 10) ) & 
-                    (flow['index'] < T - pd.Timedelta(days=T2))]
-        T2 -= 1    
-        while T2 > 0:
-            daily_part = flow[
-                (flow['index'] >= T - pd.Timedelta(days=T2) - pd.Timedelta(minutes=T1 * 10)) &
-                (flow['index'] < T - pd.Timedelta(days=T2))
-            ]
-            daily = pd.concat([daily, daily_part], ignore_index=True)
-            T2 -= 1
-        
-        weekly =  flow[
-                (flow['index'] >= T - pd.Timedelta(weeks=T3) - pd.Timedelta(minutes=T1 * 10) ) & 
-                (flow['index'] < T - pd.Timedelta(weeks=T3))
-                ]
-        T3 -= 1    
-        while T3 > 0:
-            weekly_part =  flow[
-                (flow['index'] >= T - pd.Timedelta(weeks=T3) - pd.Timedelta(minutes=T1 * 10) ) & 
-                (flow['index'] < T - pd.Timedelta(weeks=T3))
-            ]
-            weekly = pd.concat([weekly, weekly_part], ignore_index=True)
-            T3 -= 1
-
-        # 只保留数值型列（去掉时间列）
-        value_cols = [col for col in flow.columns if flow[col].dtype != 'datetime64[ns]']
-        recent = recent[value_cols]
-        daily = daily[value_cols]
-        weekly = weekly[value_cols]
-
-        return (
-            torch.from_numpy(recent.values.astype(np.float32)).T,
-            torch.from_numpy(daily.values.astype(np.float32)).T,
-            torch.from_numpy(weekly.values.astype(np.float32)).T
-        )   
-
+                    
     def forward(self, inputs):
         # recent/daily/weekly: [N, 1, T*], trajectories: [B, num_trajs, traj_len]
         forests = inputs['forest']
