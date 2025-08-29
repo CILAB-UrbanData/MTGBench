@@ -1,0 +1,8 @@
+from math import sqrt, sin, cos, pi, asin
+
+def earth_distance(lat_lng1, lat_lng2):
+    lat1, lng1 = [l*pi/180 for l in lat_lng1]
+    lat2, lng2 = [l*pi/180 for l in lat_lng2]
+    dlat, dlng = lat1-lat2, lng1-lng2
+    ds = 2 * asin(sqrt(sin(dlat/2.0) ** 2 + cos(lat1) * cos(lat2) * sin(dlng/2.0) ** 2))
+    return 6371.01 * ds  # spherical earth...
