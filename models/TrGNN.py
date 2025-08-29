@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import pickle as pkl
 from datetime import datetime as dt
 from datetime import date, timedelta
 import pandas as pd
@@ -115,10 +116,25 @@ class Model(nn.Module):
         self.output_layer = ChannelFullyConnected(in_features=4+24+1, channels=args.NumofRoads) # channels=n_road
 
         # other data stored here for convenience
-        _, _, self.W, self.W_norm = preprocess_data(args.root_path, args.start_date, args.end_date)
+        with open('/mnt/nas/home/cilab/wyx_ws/Traffic-Benchmark/data/GaiyaData/TrGNN/processed/cache/preprocess_DiDiTrGNN.pkl', 'rb') as f:
+            normalized_flows, transitions_ToD, self.W, self.W_norm = pkl.load(f)
         self.W = self.W.to(args.device)
-        self.W_norm = self.W_norm.to(args.device)       
-               
+        self.W_norm = self.W_norm.to(args.device)  
+        self._init_weights()  
+    
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_uniform_(m.weight, a=math.sqrt(5))
+                if m.bias is not None:
+                    fan_in, _ = nn.init._calculate_fan_in_and_fan_out(m.weight)
+                    bound = 1 / math.sqrt(fan_in)
+                    nn.init.uniform_(m.bias, -bound, bound)
+            elif isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
     def forward(self, input, W=None, h_init=None):
         # X: graph signal. normalized. tensor: (seq_len, n_road)
         # T: trajectory transition. normalized. tuple of seq_len sparse_tensors: (n_road, n_road)
