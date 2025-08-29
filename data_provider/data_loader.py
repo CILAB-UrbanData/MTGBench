@@ -423,7 +423,7 @@ class SF20_forTrGNN_Dataset(Dataset):
 
 
 
-class DiffTrajProcess:
+class ChengduForDifftraj:
     def __init__(self, config: dict):
         required_keys = ["traj_length", "grid_size", "input_csv", "output_dir", "min_points"]
         for key in required_keys:
