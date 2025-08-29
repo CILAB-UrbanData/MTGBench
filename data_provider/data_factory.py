@@ -1,4 +1,4 @@
-from data_provider.data_loader import MDTPRawloader, SF20_forTrajnet_Dataset, SF20_forTrGNN_Dataset, GaiyaForMDTP
+from data_provider.data_loader import MDTPRawloader, SF20_forTrajnet_Dataset, SF20_forTrGNN_Dataset, GaiyaForMDTP, Difftraj_process
 from utils.TRACK_wrapper_trllm_cont import TSLibDatasetWrapper
 from torch.utils.data import DataLoader, Subset
 import random
@@ -9,6 +9,7 @@ data_dict = {
     'Trajnet': SF20_forTrajnet_Dataset,
     'TrGNN': SF20_forTrGNN_Dataset,
     'TRACK_trllm_cont': TSLibDatasetWrapper
+    'Difftraj': Difftraj_process
 }
 
 def data_provider(args, flag='train'):
@@ -87,3 +88,30 @@ def data_provider(args, flag='train'):
             train_loader, eval_loader, test_loader = data_set.get_data()
             data_feature = data_set.get_data_feature()
         return data_set, train_loader, eval_loader, test_loader, data_feature
+
+    elif args.task_name == 'Trajectory_generation'
+        shuffle_flag = True if flag == 'train' else False
+        drop_last = True if (flag == 'train' and batch_size > 1) else False
+
+        data_set = Data(
+            args=args,                  
+            root_path=args.root_path,   
+            flag=flag,                  
+            traj_length=args.traj_len,  
+            diff_step=args.diff_step,   
+            normalization=args.normalize
+        )
+
+        print(f"[{args.task_name}] {flag} set length: {len(data_set)}")
+
+        data_loader = DataLoader(
+            data_set,
+            batch_size=batch_size,
+            shuffle=shuffle_flag,
+            num_workers=args.num_workers,  
+            drop_last=drop_last,
+            collate_fn=data_set.collate_fn if hasattr(data_set, 'collate_fn') else None
+        )
+
+        return data_set, data_loader
+        
