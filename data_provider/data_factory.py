@@ -1,4 +1,4 @@
-from data_provider.data_loader import MDTPRawloader, SF20_forTrajnet_Dataset, SF20_forTrGNN_Dataset, GaiyaForMDTP
+from data_provider.data_loader import MDTPRawloader, SF20_forTrajnet_Dataset, SF20_forTrGNN_Dataset, GaiyaForMDTP, DGM_Dataset
 from utils.TRACK_wrapper_trllm_cont import TSLibDatasetWrapper
 from torch.utils.data import DataLoader, Subset
 import random
@@ -8,7 +8,8 @@ data_dict = {
     'GaiyaForMDTP': GaiyaForMDTP,
     'Trajnet': SF20_forTrajnet_Dataset,
     'TrGNN': SF20_forTrGNN_Dataset,
-    'TRACK_trllm_cont': TSLibDatasetWrapper
+    'TRACK_trllm_cont': TSLibDatasetWrapper,
+    'DGM' : DGM_Dataset
 }
 
 def data_provider(args, flag='train'):
@@ -87,3 +88,28 @@ def data_provider(args, flag='train'):
             train_loader, eval_loader, test_loader = data_set.get_data()
             data_feature = data_set.get_data_feature()
         return data_set, train_loader, eval_loader, test_loader, data_feature
+    
+    elif args.task_name == 'ODflow_generation':
+        if args.data == 'DGM':
+            
+            dataset = DGM_Dataset(
+                list_IDs=args.list_IDs,
+                tileid2oa2features2vals=args.tileid2oa2features2vals,
+                o2d2flow=args.o2d2flow,
+                oa2features=args.oa2features,
+                oa2pop=args.oa2pop,
+                oa2centroid=args.oa2centroid,
+                dim_dests=args.dim_dests,
+                frac_true_dest=args.frac_true_dest,
+                model=args.model
+            )
+            # 根据flag决定是否打乱数据
+            shuffle = True if flag == 'train' else False
+            # 使用DGM_Dataset自定义的collate_fn
+            data_loader = DataLoader(
+                dataset,
+                batch_size=args.batch_size,
+                shuffle=shuffle,
+                collate_fn=dataset.my_collate
+            )
+            return dataset, data_loader
