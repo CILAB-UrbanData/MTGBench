@@ -13,6 +13,9 @@ from sklearn.preprocessing import StandardScaler
 from datetime import datetime as dt
 from datetime import date, timedelta
 from utils.tools import date_range, to_sparse_tensor
+from scipy.interpolate import interp1d
+from tqdm import tqdm
+from geographiclib.geodesic import Geodesic
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -417,3 +420,258 @@ class SF20_forTrGNN_Dataset(Dataset):
             'DoW': DoW_batch,
         }
         return inp, y_batch
+
+
+
+class DiffTrajProcess:
+    def __init__(self, config: dict):
+        required_keys = ["traj_length", "grid_size", "input_csv", "output_dir", "min_points"]
+        for key in required_keys:
+            if key not in config:
+                raise ValueError(f"配置缺少必要键：{key}")
+        
+        self.config = config
+        self.output_dir = config["output_dir"]
+        self.df = None
+        self.grouped_orders = None
+        self.geo_bounds = None
+        self.traj_array = None
+        self.head_array = None
+        self.traj_norm_params = None
+        self.head_scaler = None
+        
+        os.makedirs(self.output_dir, exist_ok=True)
+        print(f"输出目录已创建：{os.path.abspath(self.output_dir)}")
+        print(f"目标配置：轨迹长度={config['traj_length']}，网格尺寸={config['grid_size']}x{config['grid_size']}")
+
+
+    @staticmethod
+    def haversine_distance(lng1: float, lat1: float, lng2: float, lat2: float) -> float:
+        try:
+            return Geodesic.WGS84.Inverse(lat1, lng1, lat2, lng2)['s12']
+        except Exception:
+            R = 6371000
+            phi1, phi2 = np.radians(lat1), np.radians(lat2)
+            dphi = np.radians(lat2 - lat1)
+            dlambda = np.radians(lng2 - lng1)
+            a = np.sin(dphi/2)**2 + np.cos(phi1)*np.cos(phi2)*np.sin(dlambda/2)**2
+            return 2 * R * np.arctan2(np.sqrt(a), np.sqrt(1-a))
+
+
+    @staticmethod
+    def timestamp_to_depature_index(dt) -> int:
+        total_minutes = dt.hour * 60 + dt.minute
+        return total_minutes // 5
+
+
+    def read_and_clean_data(self) -> None:   
+        read_csv_args = {
+            "names": ['司机ID', '订单ID', 'GPS时间', '经度', '纬度'],
+            "dtype": {
+                '司机ID': str,
+                '订单ID': str,
+                '经度': str,
+                '纬度': str,
+                'GPS时间': str
+            },
+            "chunksize": 100000,
+            "encoding": "utf-8"
+        }
+        if pd.__version__ >= "1.3.0":
+            read_csv_args["on_bad_lines"] = "skip"
+        else:
+            read_csv_args["error_bad_lines"] = False
+
+        chunks = []
+        for chunk in tqdm(
+            pd.read_csv(self.config["input_csv"], **read_csv_args),
+            desc="分块读取CSV"
+        ):
+            chunks.append(chunk)
+        
+        self.df = pd.concat(chunks, ignore_index=True)
+        raw_count = len(self.df)
+        print(f"原始数据总行数：{raw_count:,}")
+
+        self.df['GPS时间'] = pd.to_datetime(self.df['GPS时间'], errors='coerce')
+        self.df['经度'] = pd.to_numeric(self.df['经度'], errors='coerce')
+        self.df['纬度'] = pd.to_numeric(self.df['纬度'], errors='coerce')
+        self.df = self.df.dropna(subset=['订单ID', 'GPS时间', '经度', '纬度'])
+        self.df = self.df[(self.df['经度'] > 0) & (self.df['纬度'] > 0)]
+        
+        clean_count = len(self.df)
+        print(f"清洗后保留行数：{clean_count:,}（过滤率：{1 - clean_count/raw_count:.2%}）")
+
+
+    def group_and_filter_orders(self) -> None:
+        print("\n" + "="*50)
+        print("="*50)
+        
+        grouped = self.df.groupby('订单ID')
+        print(f"原始订单总数：{len(grouped)}")
+
+        min_points = self.config["min_points"]
+        valid_orders = [oid for oid, group in grouped if len(group) >= min_points]
+        self.df = self.df[self.df['订单ID'].isin(valid_orders)]
+        self.grouped_orders = self.df.groupby('订单ID')
+        
+        valid_count = len(self.grouped_orders)        
+        print(f"有效订单数：{valid_count}（过滤短轨迹：{len(grouped) - valid_count}个）")
+
+
+    def calculate_geo_range(self) -> None:
+        all_lng = []
+        all_lat = []
+        for _, group in self.grouped_orders:
+            all_lng.extend(group['经度'].values)
+            all_lat.extend(group['纬度'].values)
+        all_lng = np.array(all_lng)
+        all_lat = np.array(all_lat)
+        
+        lng_min, lng_max = np.min(all_lng), np.max(all_lng)
+        lat_min, lat_max = np.min(all_lat), np.max(all_lat)
+        self.geo_bounds = (lng_min, lng_max, lat_min, lat_max)
+        
+        print(f"经度范围：[{lng_min:.6f}, {lng_max:.6f}]")
+        print(f"纬度范围：[{lat_min:.6f}, {lat_max:.6f}]")
+
+
+    def generate_traj_npy(self) -> None:
+        traj_length = self.config["traj_length"]
+        traj_list = []
+        
+        for oid, group in tqdm(self.grouped_orders, desc="处理轨迹"):
+            group_sorted = group.sort_values('GPS时间')
+            lat = group_sorted['纬度'].values.astype(np.float64)
+            lng = group_sorted['经度'].values.astype(np.float64)
+            n_points = len(group_sorted)
+            
+            old_indices = np.arange(n_points)
+            new_indices = np.linspace(0, n_points - 1, traj_length)
+            interp_lat = interp1d(old_indices, lat, kind='linear', assume_sorted=True)(new_indices)
+            interp_lng = interp1d(old_indices, lng, kind='linear', assume_sorted=True)(new_indices)
+            
+            traj = np.stack([interp_lat, interp_lng], axis=0).astype(np.float32)
+            traj_list.append(traj)
+        
+        self.traj_array = np.stack(traj_list, axis=0)
+        mean_lat = np.mean(self.traj_array[:, 0, :])
+        std_lat = np.std(self.traj_array[:, 0, :]) + 1e-8
+        mean_lng = np.mean(self.traj_array[:, 1, :])
+        std_lng = np.std(self.traj_array[:, 1, :]) + 1e-8
+        
+        self.traj_array[:, 0, :] = (self.traj_array[:, 0, :] - mean_lat) / std_lat
+        self.traj_array[:, 1, :] = (self.traj_array[:, 1, :] - mean_lng) / std_lng
+        
+        expected_shape = (len(self.grouped_orders), 2, traj_length)
+        assert self.traj_array.shape == expected_shape, \
+            f"traj形状错误！实际：{self.traj_array.shape}，预期：{expected_shape}"
+        
+        traj_path = os.path.join(self.output_dir, "traj.npy")
+        np.save(traj_path, self.traj_array)
+        self.traj_norm_params = {"mean_lat": mean_lat, "std_lat": std_lat, "mean_lng": mean_lng, "std_lng": std_lng}
+        print(f"traj.npy 保存完成！路径：{os.path.abspath(traj_path)}，形状：{self.traj_array.shape}")
+
+
+    def _get_grid_id(self, lng: float, lat: float) -> int:
+        lng_min, lng_max, lat_min, lat_max = self.geo_bounds
+        grid_size = self.config["grid_size"]
+        
+        grid_col = ((lng - lng_min) / (lng_max - lng_min + 1e-8)) * (grid_size - 1)
+        grid_row = ((lat - lat_min) / (lat_max - lat_min + 1e-8)) * (grid_size - 1)
+        
+        grid_id = int(grid_row) * grid_size + int(grid_col)
+        return np.clip(grid_id, 0, grid_size**2 - 1)
+
+
+    def generate_head_npy(self) -> None:
+
+        head_features = []
+        for oid, group in tqdm(self.grouped_orders, desc="提取头部特征"):
+            group_sorted = group.sort_values('GPS时间')
+            coords = group_sorted[['经度', '纬度']].values
+            start_time = group_sorted['GPS时间'].iloc[0]
+            end_time = group_sorted['GPS时间'].iloc[-1]
+            n_points = len(group_sorted)
+            
+            depature_idx = self.timestamp_to_depature_index(start_time)
+            depature_idx = np.clip(depature_idx, 0, 287)
+            
+            total_distance = 0.0
+            for i in range(1, n_points):
+                total_distance += self.haversine_distance(
+                    coords[i-1][0], coords[i-1][1],
+                    coords[i][0], coords[i][1]
+                )
+            
+            duration = (end_time - start_time).total_seconds()
+            duration = max(duration, 1e-8)
+            
+            raw_length = n_points
+            avg_step = total_distance / (raw_length - 1) if raw_length > 1 else 0.0
+            avg_speed = total_distance / duration
+            
+            sid = self._get_grid_id(coords[0][0], coords[0][1])
+            eid = self._get_grid_id(coords[-1][0], coords[-1][1])
+            
+            head_features.append([
+                depature_idx, total_distance, duration, raw_length,
+                avg_step, avg_speed, sid, eid
+            ])
+        
+        self.head_array = np.array(head_features, dtype=np.float32)
+        self.head_scaler = StandardScaler()
+        self.head_array[:, 1:6] = self.head_scaler.fit_transform(self.head_array[:, 1:6])
+        
+        self.head_array[:, 0] = self.head_array[:, 0].astype(int)
+        self.head_array[:, 6] = self.head_array[:, 6].astype(int)
+        self.head_array[:, 7] = self.head_array[:, 7].astype(int)
+        
+        self._verify_head_features()
+        
+        head_path = os.path.join(self.output_dir, "head.npy")
+        np.save(head_path, self.head_array)
+        print(f"head.npy 保存完成！路径：{os.path.abspath(head_path)}，形状：{self.head_array.shape}")
+
+
+    def _verify_head_features(self) -> None:
+        depature_min, depature_max = self.head_array[:, 0].min(), self.head_array[:, 0].max()
+        sid_min, sid_max = self.head_array[:, 6].min(), self.head_array[:, 6].max()
+        eid_min, eid_max = self.head_array[:, 7].min(), self.head_array[:, 7].max()
+        grid_max = self.config["grid_size"]**2 - 1
+        
+        print(f"出发时间索引范围：[{depature_min}, {depature_max}]（预期0~287）")
+        print(f"起点ID（sid）范围：[{sid_min}, {sid_max}]（预期0~{grid_max}）")
+        print(f"终点ID（eid）范围：[{eid_min}, {eid_max}]（预期0~{grid_max}）")
+        
+        expected_shape = (len(self.grouped_orders), 8)
+    def save_norm_params(self) -> None:
+
+        norm_params = {
+            "traj": self.traj_norm_params,
+            "head": {
+                "mean": self.head_scaler.mean_,
+                "std": self.head_scaler.scale_
+            },
+            "config": self.config
+        }
+        
+        norm_path = os.path.join(self.output_dir, "norm_params.npy")
+        np.save(norm_path, norm_params)
+
+
+    def run(self) -> None:
+
+        self.read_and_clean_data()
+        self.group_and_filter_orders()
+        self.calculate_geo_range()
+        self.generate_traj_npy()
+        self.generate_head_npy()
+        self.save_norm_params()
+        
+        print("\n" + "="*60)
+        print("处理完成  文件清单：")
+        print(f"1. traj.npy：{os.path.abspath(os.path.join(self.output_dir, 'traj.npy'))}")
+        print(f"2. head.npy：{os.path.abspath(os.path.join(self.output_dir, 'head.npy'))}")
+        print(f"3. norm_params.npy：{os.path.abspath(os.path.join(self.output_dir, 'norm_params.npy'))}")
+        print("="*60)
