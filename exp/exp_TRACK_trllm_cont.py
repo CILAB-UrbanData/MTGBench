@@ -1,3 +1,5 @@
+from datetime import datetime
+import pandas as pd
 import os
 import time
 import tqdm
@@ -9,7 +11,7 @@ from functools import partial
 import utils.losses as loss
 from data_provider.data_factory import data_provider
 from exp.exp_basic import Exp_Basic
-from utils.tools import ensure_dir, EarlyStopping, adjust_learning_rate
+from utils.tools import ensure_dir, EarlyStopping, adjust_learning_rate, CosineLRScheduler, top_k
 
 class Exp_trllm(Exp_Basic):
     def __init__(self, args):
@@ -65,8 +67,11 @@ class Exp_trllm(Exp_Basic):
         self.criterion_mask = nn.NLLLoss(ignore_index=0, reduction='none')
         self.time_loss_ratio = args.get("time_loss_ratio", 1)
         self.mlm_loss_ratio = args.get("mlm_loss_ratio", 1)
-        self.cont_loss_ratio = args.get("cont_loss_ratio", 1)    
+        self.cont_loss_ratio = args.get("cont_loss_ratio", 1)  
+        self.topk = args.get('topk', [1])  
         self.args = args
+
+        self.evaluator_clear()
 
     def _cal_loss(self, pred, targets, targets_mask):
         batch_loss_list = self.criterion_mask(pred.transpose(1, 2), targets)
@@ -118,11 +123,193 @@ class Exp_trllm(Exp_Basic):
                                          eps=self.lr_epsilon, weight_decay=self.weight_decay)
         return optimizer
 
-    def vali(self, eval_loader):
-        pass
+    def _contrastive_loss(self, z1, z2, loss_type):
+        if loss_type == 'simsce':
+            return self._contrastive_loss_simsce(z1, z2)
+        elif loss_type == 'simclr':
+            return self._contrastive_loss_simclr(z1, z2)
+        elif loss_type == 'consert':
+            return self._contrastive_loss_consert(z1, z2)
+        else:
+            raise ValueError('Error contrastive loss type {}!'.format(loss_type))
 
-    def test(self, test_loader):
-        pass
+    def _build_lr_scheduler(self):
+        self.lr_scheduler_type = self.args.get('lr_scheduler', 'cosinelr')
+        if self.lr_scheduler_type.lower() == 'multisteplr':
+            self.lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+                self.optimizer, milestones=self.milestones, gamma=self.lr_decay_ratio)
+        elif self.lr_scheduler_type.lower() == 'steplr':
+            self.lr_scheduler = torch.optim.lr_scheduler.StepLR(
+                self.optimizer, step_size=self.step_size, gamma=self.lr_decay_ratio)
+        elif self.lr_scheduler_type.lower() == 'exponentiallr':
+            self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
+                self.optimizer, gamma=self.lr_decay_ratio)
+        elif self.lr_scheduler_type.lower() == 'cosineannealinglr':
+            self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer, T_max=self.lr_T_max, eta_min=self.lr_eta_min)
+        elif self.lr_scheduler_type.lower() == 'lambdalr':
+            self.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
+                self.optimizer, lr_lambda=self.lr_lambda)
+        elif self.lr_scheduler_type.lower() == 'reducelronplateau':
+            self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                self.optimizer, mode='min', patience=self.lr_patience,
+                factor=self.lr_decay_ratio, threshold=self.lr_threshold)
+        elif self.lr_scheduler_type.lower() == 'cosinelr':
+            self.lr_scheduler = CosineLRScheduler(
+                self.optimizer, t_initial=self.epochs, lr_min=self.lr_eta_min, decay_rate=self.lr_decay_ratio,
+                warmup_t=self.lr_warmup_epoch, warmup_lr_init=self.lr_warmup_init, t_in_epochs=self.t_in_epochs)
+
+    def vali(self, eval_loader):
+        self.model.eval()
+        total_loss_list = []
+        with torch.no_grad():
+            for batch in eval_loader:
+                contra_view1, contra_view2, padding_masks1, padding_masks2, \
+                    X, targets, target_masks, padding_masks = batch
+                contra_view1 = contra_view1.to(self.device)
+                contra_view2 = contra_view2.to(self.device)
+                padding_masks1 = padding_masks1.to(self.device)  # 0s: ignore
+                padding_masks2 = padding_masks2.to(self.device)  # 0s: ignore
+                X = X.to(self.device)
+                targets = targets.to(self.device)
+                target_masks = target_masks.to(self.device)  # 1s: mask and predict, 0s: unaffected input (ignore)
+                padding_masks = padding_masks.to(self.device)  # 0s: ignore
+
+                predictions_l, predictions_t, z1, z2 = self.model(
+                    contra_view1, padding_masks1, contra_view2, padding_masks2,
+                    X, padding_masks, batch_temporal_mat=None,
+                )
+                # (B, d_model), (B, d_model), (B, T, vocab_size), (B, T, 1441)
+                targets_time = targets[..., 1].float() / 60.0  # (B, seq_len)
+                mean_loss_t = 0
+                if predictions_t is not None:
+                    mean_loss_t = loss.masked_mae_torch(predictions_t, targets_time, 0)
+                targets_l, target_masks_l = targets[..., 0], target_masks[..., 0]
+                mean_loss_l, batch_loss_l, num_active_l = self._cal_loss(predictions_l, targets_l, target_masks_l)
+                mean_loss_con = self._contrastive_loss(z1, z2, self.contra_loss_type)
+
+                mean_loss = self.time_loss_ratio * mean_loss_t + \
+                            self.mlm_loss_ratio * mean_loss_l + \
+                            self.cont_loss_ratio * mean_loss_con
+
+                if self.test_align_uniform or self.train_align_uniform:
+                    align_uniform_loss, align_loss, uniform_loss = self.align_uniform(z1, z2)
+                    if self.train_align_uniform:
+                        mean_loss += align_uniform_loss  
+
+                total_loss = mean_loss
+                if self.l2_reg is not None:
+                    total_loss += self.l2_reg * loss.l2_reg_loss(self.model)
+
+                total_loss_list.append(total_loss.item())
+
+        total_loss = np.mean(total_loss_list)
+        return total_loss
+
+    def test(self, setting, test):
+        data_set, train_loader, eval_loader, test_loader, data_feature = self._get_data()
+        self.model.eval()
+        with torch.no_grad():
+            for batch in test_loader:
+                contra_view1, contra_view2, padding_masks1, padding_masks2, \
+                    X, targets, target_masks, padding_masks = batch
+                contra_view1 = contra_view1.to(self.device)
+                contra_view2 = contra_view2.to(self.device)
+                padding_masks1 = padding_masks1.to(self.device)  # 0s: ignore
+                padding_masks2 = padding_masks2.to(self.device)  # 0s: ignore
+                X = X.to(self.device)
+                targets = targets.to(self.device)
+                target_masks = target_masks.to(self.device)  # 1s: mask and predict, 0s: unaffected input (ignore)
+                padding_masks = padding_masks.to(self.device)  # 0s: ignore
+
+                predictions_l, predictions_t, z1, z2 = self.model(
+                    contra_view1, padding_masks1, contra_view2, padding_masks2,
+                    X, padding_masks, batch_temporal_mat=None,
+                )
+                # (B, d_model), (B, d_model), (B, T, vocab_size), (B, T, 1441)
+                targets_time = targets[..., 1].float() / 60.0  # (B, seq_len)
+                mean_loss_t = 0
+                if predictions_t is not None:
+                    mean_loss_t = loss.masked_mae_torch(predictions_t, targets_time, 0)
+                targets_l, target_masks_l = targets[..., 0], target_masks[..., 0]
+                mean_loss_l, batch_loss_l, num_active_l = self._cal_loss(predictions_l, targets_l, target_masks_l)
+                mean_loss_con = self._contrastive_loss(z1, z2, self.contra_loss_type)
+
+                mean_loss = self.time_loss_ratio * mean_loss_t + \
+                            self.mlm_loss_ratio * mean_loss_l + \
+                            self.cont_loss_ratio * mean_loss_con
+
+                if self.test_align_uniform or self.train_align_uniform:
+                    align_uniform_loss, align_loss, uniform_loss = self.align_uniform(z1, z2)
+                    if self.train_align_uniform:
+                        mean_loss += align_uniform_loss 
+
+                evaluate_input = {
+                        'loc_true': targets_l[target_masks_l].reshape(-1, 1).squeeze(-1).cpu().numpy(),  # (num_active, )
+                        'loc_pred': predictions_l[target_masks_l].reshape(-1, predictions_l.shape[-1]).cpu().numpy()  # (num_active, n_class)
+                    }
+                self.collect(evaluate_input) 
+                
+            folder_path = './test_results/' + setting + '/'
+            self.save_result(save_path=folder_path, filename='test_result')
+
+    def evaluator_clear(self):
+        self.result = {}
+        self.intermediate_result = dict()
+        self.intermediate_result['total'] = 0
+        for inter in ['hit']:
+            for k in self.topk:
+                self.intermediate_result[inter + '@' + str(k)] = 0
+        for inter in ['rank', 'dcg']:
+            for k in self.topk:
+                self.intermediate_result[inter + '@' + str(k)] = 0.0
+
+    def collect(self, evaluate_input):
+        total = len(evaluate_input['loc_true'])
+        self.intermediate_result['total'] += total
+        for k in self.topk:
+            hit, rank, dcg = top_k(evaluate_input['loc_pred'], evaluate_input['loc_true'], k)
+            self.intermediate_result['hit@' + str(k)] += hit
+            self.intermediate_result['rank@' + str(k)] += rank
+            self.intermediate_result['dcg@' + str(k)] += dcg
+
+    def evaluate(self):
+        for k in self.topk:
+            precision = self.intermediate_result['hit@{}'.format(k)] / (self.intermediate_result['total'] * k)
+            self.result['Precision@{}'.format(k)] = precision
+            recall = self.intermediate_result['hit@{}'.format(k)] / self.intermediate_result['total']
+            self.result['Recall@{}'.format(k)] = recall
+            self.result['F1@{}'.format(k)] = \
+                0.0 if precision + recall == 0 else (2 * precision * recall) / (precision + recall)
+
+            self.result['MRR@{}'.format(k)] = \
+                self.intermediate_result['rank@{}'.format(k)] / self.intermediate_result['total']
+            self.result['MAP@{}'.format(k)] = \
+                self.intermediate_result['rank@{}'.format(k)] / self.intermediate_result['total']
+            self.result['NDCG@{}'.format(k)] = \
+                self.intermediate_result['dcg@{}'.format(k)] / self.intermediate_result['total']
+        return self.result
+    
+    def save_result(self, save_path, filename=None):
+        self.evaluate()
+        ensure_dir(save_path)
+        if filename is None:
+            filename = str(self.config['exp_id']) + '_' + \
+                       datetime.now().strftime('%Y_%m_%d_%H_%M_%S') + '_' + \
+                       self.config['model'] + '_' + self.config['dataset']
+        dataframe = {}
+        if 'csv' in self.save_modes:
+            for metric in self.metrics:
+                dataframe[metric] = []
+            for metric in self.metrics:
+                for k in self.topk:
+                    dataframe[metric].append(self.result[metric + '@' + str(k)])
+            dataframe = pd.DataFrame(dataframe, index=self.topk)
+            path = os.path.join(save_path, '{}.csv'.format(filename))
+            dataframe.to_csv(path, index=False)
+            self._logger.info('Evaluate result is saved at ' + path)
+            self._logger.info("\n" + str(dataframe))
+        return dataframe
 
     def train(self, setting):
         data_set, train_loader, eval_loader, test_loader, data_feature = self._get_data()
@@ -135,13 +322,11 @@ class Exp_trllm(Exp_Basic):
         train_steps = len(train_loader)
         early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
 
-        model_optim = self._select_optimizer()
-
         for epoch in range(self.args.train_epochs):
             iter_count = 0
             self.model.train()
             epoch_time = time.time()
-            model_optim.zero_grad()
+            self.model_optim.zero_grad()
 
             batches_seen = epoch * train_steps      
 
@@ -197,10 +382,10 @@ class Exp_trllm(Exp_Basic):
                     nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
 
                 if batches_seen % self.grad_accmu_steps == 0:
-                    model_optim.step()
-                    if self.lr_scheduler_type == 'cosinelr' and self.lr_scheduler is not None:
+                    self.model_optim.step()
+                    if self.lr_scheduler_type == 'cosinelr' and self.lr_scheduler is not None:  
                         self.lr_scheduler.step_update(num_updates=batches_seen // self.grad_accmu_steps)
-                    model_optim.zero_grad()   
+                    self.model_optim.zero_grad()
 
                 with torch.no_grad():
                     total_correct_l += self._cal_acc(predictions_l, targets_l, target_masks_l)
@@ -222,7 +407,7 @@ class Exp_trllm(Exp_Basic):
             train_correct_l = total_correct_l / total_active_elements_l * 100.0
 
             vali_loss, vali_correct_l = self.vali(eval_loader)
-            test_loss, test_correct_l = self.test(test_loader)
+            test_loss, test_correct_l = self.vali(test_loader)
 
             print("Epoch: {} | train_loss: {:.7f}, train_acc: {:.2f}% | vali_loss: {:.7f}, vali_acc: {:.2f}% | test_loss: {:.7f}, test_acc: {:.2f}%".format(
                 epoch + 1, train_loss, train_correct_l, vali_loss, vali_correct_l, test_loss, test_correct_l))
@@ -241,7 +426,7 @@ class Exp_trllm(Exp_Basic):
                 "test_acc": test_correct_l
             })
 
-            adjust_learning_rate(model_optim, epoch + 1, self.args)
+            adjust_learning_rate(self.model_optim, epoch + 1, self.args)
 
         best_model_path = path + '/' + 'checkpoint.pth'
         self.model.load_state_dict(torch.load(best_model_path))

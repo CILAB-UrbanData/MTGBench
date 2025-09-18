@@ -1,4 +1,4 @@
-import torch, os, time, wandb
+import torch, os, time, wandb, tqdm
 import numpy as np
 import torch.nn as nn
 from utils.tools import EarlyStopping, adjust_learning_rate
@@ -20,24 +20,6 @@ class ExpPrediction(Exp_Basic):
     def _get_data(self, flag):
         data_set, data_loader = data_provider(self.args, flag)
         return data_set, data_loader
-    
-    def _select_optimizer(self):
-        if self.args.learner.lower() == 'adam':
-            optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.learning_rate)                                        
-        elif self.args.learner.lower() == 'sgd':
-            optimizer = torch.optim.SGD(self.model.parameters(), lr=self.args.learning_rate)  
-        elif self.args.learner.lower() == 'adagrad':
-            optimizer = torch.optim.Adagrad(self.model.parameters(), lr=self.args.learning_rate)  
-        elif self.args.learner.lower() == 'rmsprop':
-            optimizer = torch.optim.RMSprop(self.model.parameters(), lr=self.args.learning_rate)  
-        elif self.args.learner.lower() == 'sparse_adam':
-            optimizer = torch.optim.SparseAdam(self.model.parameters(), lr=self.args.learning_rate)  
-        elif self.args.learner.lower() == 'adamw':
-            optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.args.learning_rate)  
-        else:
-            self._logger.warning('Received unrecognized optimizer, set default Adam optimizer')
-            optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.learning_rate)  
-        return optimizer
 
     def _select_criterion(self):
         if self.args.model == "Trajnet" or self.args.model == "MDTP" or self.args.model == "MDTPmini":
@@ -56,7 +38,7 @@ class ExpPrediction(Exp_Basic):
             self.model.reset_state()
 
         with torch.no_grad():
-            for i, (inputs, target) in enumerate(data_loader):
+            for i, (inputs, target) in tqdm(enumerate(data_loader), desc='validate', total=len(data_loader)):
                 target = target.to(self.args.device)
                 if self.args.use_amp:
                     with torch.amp.autocast():
@@ -84,7 +66,7 @@ class ExpPrediction(Exp_Basic):
         train_steps = len(train_loader)
         early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
 
-        model_optim = self._select_optimizer()
+
         criterion = self._select_criterion()
 
         if self.args.use_amp:
@@ -102,9 +84,9 @@ class ExpPrediction(Exp_Basic):
             if hasattr(self.model, "reset_state"):
                 self.model.reset_state()
 
-            for i, (inputs, target) in enumerate(train_loader):
+            for i, (inputs, target) in tqdm(enumerate(train_loader), desc=f'train, epoch: {epoch + 1}', total=len(train_loader)):
                 iter_count += 1
-                model_optim.zero_grad()
+                self.model_optim.zero_grad()
 
                 target = target.to(self.args.device)
 
@@ -130,11 +112,11 @@ class ExpPrediction(Exp_Basic):
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.grad_clip)
                 if self.args.use_amp:
                     scaler.scale(loss).backward()
-                    scaler.step(model_optim)
+                    scaler.step(self.model_optim)
                     scaler.update()
                 else:
                     loss.backward()
-                    model_optim.step()
+                    self.model_optim.step()
 
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
             train_loss = np.mean(train_loss)
@@ -155,13 +137,13 @@ class ExpPrediction(Exp_Basic):
                 "test_loss": test_loss
             })
             
-            adjust_learning_rate(model_optim, epoch + 1, self.args)
+            adjust_learning_rate(self.model_optim, epoch + 1, self.args)
 
         best_model_path = path + '/' + 'checkpoint.pth'
         self.model.load_state_dict(torch.load(best_model_path))
         return self.model
         
-    def test(self, setting, test=0):
+    def test(self, setting, test=0):#TODO:MDTP的denormalize
         test_data, test_loader = self._get_data(flag='test')
         if test:
             print('loading model')

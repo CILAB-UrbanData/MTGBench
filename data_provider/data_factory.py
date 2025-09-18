@@ -1,5 +1,5 @@
 from data_provider.data_loader import MDTPRawloader, SF20_forTrajnet_Dataset, SF20_forTrGNN_Dataset, GaiyaForMDTP, DiDi_forTrGNN_Dataset
-from utils.TRACK_wrapper_trllm_cont import TSLibDatasetWrapper
+from utils.TRACK_Dataset_trllm_cont import TRLLMContDataset
 from torch.utils.data import DataLoader, Subset
 import random
 
@@ -8,7 +8,7 @@ data_dict = {
     'GaiyaForMDTP': GaiyaForMDTP,
     'Trajnet': SF20_forTrajnet_Dataset,
     'TrGNN': SF20_forTrGNN_Dataset,
-    'TRACK_trllm_cont': TSLibDatasetWrapper,
+    'TRACK_trllm_cont': TRLLMContDataset,
     'DiDiTrGNN': DiDi_forTrGNN_Dataset
 }
 

@@ -65,6 +65,16 @@ if __name__ == '__main__':
     parser.add_argument('--end_date', type=str, default='20080518')
     parser.add_argument('--NumofRoads', type=int, default=19621)
 
+    '''TRACK_trllm_cont's args'''
+    parser.add_argument('--vocab_path', type=str, default=None, help='vocab path')
+    parser.add_argument('--add_cls', action='store_true', help='whether to add cls token', default=False)
+    parser.add_argument('--masking_ratio', type=float, default=0.15, help='masking ratio')
+    parser.add_argument('--masking_mode', type=str, default='together', help='masking mode, options: [together, separate]')
+    parser.add_argument('--distribution', type=str, default='random', help='masking distribution    , options: [random, poisson]')
+    parser.add_argument('--avg_mask_len', type=int, default=2, help='average masking length for poisson distribution')
+    parser.add_argument('--data_augment1', type=str, default='trim', help='data augmentation method for first view, options: [trim, shift, none]')
+    parser.add_argument('--data_augment2', type=str, default='shift', help='data augmentation method for second view, options: [trim, shift, none]')
+
     # optimization
     parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
     parser.add_argument('--itr', type=int, default=1, help='experiments times')
@@ -75,6 +85,7 @@ if __name__ == '__main__':
     parser.add_argument('--des', type=str, default='test', help='exp description')
     parser.add_argument('--loss', type=str, default='L1', help='loss function')
     parser.add_argument('--lradj', type=str, default='type1', help='adjust learning rate')
+    parser.add_argument('--lr_istorch', action='store_true', help='whether to use the learning rate scheduler provided by Pytorch', default=False)
     parser.add_argument('--learner', type=str, default='adam', help='optimizer type')
     parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
 
