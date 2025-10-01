@@ -1,6 +1,6 @@
 import os
 import torch
-from models import MDTP, Trajnet, TrGNN, TRACK_TRLLM_Cont, TRACK_DRNTRLTSP, MDTPmini
+from models import MDTP, MDTPSingle, Trajnet, TrGNN, TRACK_TRLLM_Cont, TRACK_DRNTRLTSP
 
 
 class Exp_Basic(object):
@@ -8,7 +8,7 @@ class Exp_Basic(object):
         self.args = args
         self.model_dict = {
             'MDTP': MDTP,
-            'MDTPmini': MDTPmini,
+            'MDTPmini': MDTPSingle,
             'Trajnet': Trajnet,
             'TrGNN': TrGNN,
             'TRACK_TRLLM_Cont': TRACK_TRLLM_Cont,
