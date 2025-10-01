@@ -175,143 +175,6 @@ class Exp_drntrlCont(Exp_Basic):
         else:
             raise ValueError('Error contrastive loss type {}!'.format(loss_type))
 
-    def _train_epoch(self, train_dataloader, epoch_idx, batches_seen=None):
-        self.model.train()
-        traf_epoch_loss = 0  # total traf loss of epoch
-        traj_epoch_loss = 0  # total traj loss of epoch
-        time_epoch_loss = 0  # total time loss of epoch
-        cont_epoch_loss = 0  # total cont loss of epoch
-        match_epoch_loss = 0  # total match loss of epoch
-        total_correct = 0  # total top@1 acc for masked elements in epoch
-        total_active_elements = 0  # total masked elements in epoch
-        for i, batch in tqdm(enumerate(train_dataloader), desc=f"Train epoch={epoch_idx}", total=len(train_dataloader)):
-            traj, targets, target_masks, padding_masks,\
-                traj1, padding_masks1, traj2, padding_masks2, traf_X, traf_Y = batch
-            traj = traj.to(self.device)  # (B, traj_B, seq_len, feat_dim)
-            targets = targets.to(self.device)  # (B, traj_B, seq_len, feat_dim)
-            target_masks = target_masks.to(self.device)  # (B, traj_B, seq_len, feat_dim)
-            padding_masks = padding_masks.to(self.device)  # (B, traj_B, seq_len)
-            traj1 = traj1.to(self.device)  # (B, traj_B, seq_len, feat_dim)
-            padding_masks1 = padding_masks1.to(self.device)  # (B, traj_B, seq_len)
-            traj2 = traj2.to(self.device)  # (B, traj_B, seq_len, feat_dim)
-            padding_masks2 = padding_masks2.to(self.device)  # (B, traj_B, seq_len)
-            traf_X = traf_X.to(self.device)  # (B, T, N, D)
-            traf_Y = traf_Y.to(self.device)  # (B, T, N, D)
-            out_lap_pos_enc = self.out_lap_mx.to(self.device)
-            in_lap_pos_enc = self.in_lap_mx.to(self.device)
-            if self.random_flip:
-                out_sign_flip = torch.rand(out_lap_pos_enc.size(1)).to(self.device)
-                out_sign_flip[out_sign_flip >= 0.5] = 1.0
-                out_sign_flip[out_sign_flip < 0.5] = -1.0
-                out_lap_pos_enc = out_lap_pos_enc * out_sign_flip.unsqueeze(0)
-                in_sign_flip = torch.rand(in_lap_pos_enc.size(1)).to(self.device)
-                in_sign_flip[in_sign_flip >= 0.5] = 1.0
-                in_sign_flip[in_sign_flip < 0.5] = -1.0
-                in_lap_pos_enc = in_lap_pos_enc * in_sign_flip.unsqueeze(0)
-
-            pred_next_traf, pred_masked_traj, pred_masked_time, pool_out_traj1, pool_out_traj2, pool_drn_out_traj = self.model(
-                traf_X, out_lap_pos_enc, in_lap_pos_enc,
-                traj1, padding_masks1, traj2, padding_masks2,
-                traj, padding_masks, batch_temporal_mat=None,
-                graph_dict=self.graph_dict,
-            )  # (B, N, 1), (B, traj_B, seq_len, vocab_size), (B, traj_B, seq_len)
-
-            true_next_traf = self._scaler.inverse_transform(traf_Y[..., :self.output_dim].squeeze(1))
-            pred_next_traf = self._scaler.inverse_transform(pred_next_traf[..., :self.output_dim])
-            traf_loss = loss.masked_mae_torch(pred_next_traf, true_next_traf, 0)
-
-            targets_time = targets[..., 1].float() / 60.0  # (B, traj_B, seq_len)
-            time_loss = torch.zeros(1, dtype=torch.float32).to(self.device)
-            if pred_masked_time is not None:
-                time_loss = loss.masked_mae_torch(pred_masked_time, targets_time, 0)
-
-            targets = targets[..., 0]  # (B, traj_B, seq_len)
-            target_masks = target_masks[..., 0]  # (B, traj_B, seq_len)
-            targets = targets.view(-1, targets.shape[-1])  # (B * traj_B, seq_len)
-            target_masks = target_masks.view(-1, target_masks.shape[-1])  # (B * traj_B, seq_len)
-            # (B * traj_B, seq_len, vocab_size)
-            pred_masked_traj = pred_masked_traj.view(-1, pred_masked_traj.shape[-2], pred_masked_traj.shape[-1])
-            traj_loss_list = self.criterion(pred_masked_traj.transpose(1, 2), targets)
-            traj_batch_loss = torch.sum(traj_loss_list)
-            num_active = target_masks.sum()
-            traj_loss = traj_batch_loss / num_active
-
-            match_loss = torch.zeros(1, dtype=torch.float32).to(self.device)
-            if pool_drn_out_traj is not None and pool_out_traj2.shape[0] > 1:
-                match_loss = self._cal_match_loss(pool_out_traj2, pool_drn_out_traj)
-
-            pool_out_traj1 = pool_out_traj1.view(-1, pool_out_traj1.shape[-1])
-            pool_out_traj2 = pool_out_traj2.view(-1, pool_out_traj2.shape[-1])
-            cont_loss = self._cal_cont_loss(pool_out_traj1, pool_out_traj2, self.cont_loss_type)
-
-            total_loss = traf_loss + traj_loss + time_loss + cont_loss + match_loss
-
-            if self.test_align_uniform:
-                align_uniform_loss, align_loss, uniform_loss = self.align_uniform(pool_out_traj1, pool_out_traj2)
-
-            if self.l2_reg is not None:
-                total_loss += self.l2_reg * loss.l2_reg_loss(self.model)
-
-            total_loss = total_loss / self.grad_accmu_steps
-            batches_seen += 1
-
-            total_loss.backward()
-            if self.clip_grad_norm:
-                nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
-
-            if batches_seen % self.grad_accmu_steps == 0:
-                self.optimizer.step()
-                if self.lr_scheduler_type == 'cosinelr' and self.lr_scheduler is not None:
-                    self.lr_scheduler.step_update(num_updates=batches_seen // self.grad_accmu_steps)
-                self.optimizer.zero_grad()
-
-            with torch.no_grad():
-                mask_label = targets[target_masks]
-                lm_output = pred_masked_traj[target_masks].argmax(dim=-1)
-                assert mask_label.shape == lm_output.shape
-                correct = mask_label.eq(lm_output).sum().item()
-                total_correct += correct
-                total_active_elements += num_active.item()
-                traj_epoch_loss += traj_batch_loss.item()
-                traf_epoch_loss += traf_loss.item()
-                time_epoch_loss += time_loss.item()
-                cont_epoch_loss += cont_loss.item()
-                match_epoch_loss += match_loss.item()
-
-            post_fix = {
-                "mode": "Train",
-                "epoch": epoch_idx,
-                "iter": i,
-                "lr": self.optimizer.param_groups[0]['lr'],
-                "traf_loss": traf_loss.item(),
-                "traj_loss": traj_loss.item(),
-                "time_loss": time_loss.item(),
-                "cont_loss": cont_loss.item(),
-                "match_loss": match_loss.item(),
-                "acc(%)": total_correct / total_active_elements * 100,
-            }
-            if self.test_align_uniform:
-                post_fix['align_loss'] = align_loss
-                post_fix['uniform_loss'] = uniform_loss
-            if i % self.log_batch == 0:
-                self._logger.info(str(post_fix))
-
-        traf_epoch_loss = traf_epoch_loss / len(train_dataloader)
-        traj_epoch_loss = traj_epoch_loss / total_active_elements
-        time_epoch_loss = time_epoch_loss / len(train_dataloader)
-        cont_epoch_loss = cont_epoch_loss / len(train_dataloader)
-        match_epoch_loss = match_epoch_loss / len(train_dataloader)
-        total_correct = total_correct / total_active_elements * 100.0
-        self._logger.info(
-            f"Train: expid = {self.exp_id}, Epoch = {epoch_idx}, traf_avg_loss = {traf_epoch_loss},\
-            traj_avg_loss = {traj_epoch_loss}, time_avg_loss = {time_epoch_loss}, cont_avg_loss = {cont_epoch_loss},\
-            match_avg_loss = {match_epoch_loss}, total_acc = {total_correct}%."
-        )
-        epoch_loss = traf_epoch_loss + traj_epoch_loss + time_epoch_loss + cont_epoch_loss + match_epoch_loss
-        self._writer.add_scalar('Train loss', epoch_loss, epoch_idx)
-        self._writer.add_scalar('Train acc', total_correct, epoch_idx)
-        return epoch_loss, batches_seen
-
     def _valid_epoch(self, eval_dataloader, epoch_idx, mode='Eval'):
         self.model.eval()
         traf_epoch_loss = 0  # total traf loss of epoch
@@ -430,4 +293,142 @@ class Exp_drntrlCont(Exp_Basic):
         train_steps = len(train_loader)
         early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
 
-        
+        for epoch in range(self.args.train_epochs):
+            iter_count = 0
+            self.model.train()
+            epoch_time = time.time()
+            self.model_optim.zero_grad()        
+            traf_epoch_loss = 0  # total traf loss of epoch
+            traj_epoch_loss = 0  # total traj loss of epoch
+            time_epoch_loss = 0  # total time loss of epoch
+            cont_epoch_loss = 0  # total cont loss of epoch
+            match_epoch_loss = 0  # total match loss of epoch
+            total_correct = 0  # total top@1 acc for masked elements in epoch
+            total_active_elements = 0  # total masked elements in epoch
+            for i, batch in tqdm(enumerate(train_loader), desc=f"Train epoch={epoch}", total=len(train_loader)):
+                traj, targets, target_masks, padding_masks,\
+                    traj1, padding_masks1, traj2, padding_masks2, traf_X, traf_Y = batch
+                traj = traj.to(self.device)  # (B, traj_B, seq_len, feat_dim)
+                targets = targets.to(self.device)  # (B, traj_B, seq_len, feat_dim)
+                target_masks = target_masks.to(self.device)  # (B, traj_B, seq_len, feat_dim)
+                padding_masks = padding_masks.to(self.device)  # (B, traj_B, seq_len)
+                traj1 = traj1.to(self.device)  # (B, traj_B, seq_len, feat_dim)
+                padding_masks1 = padding_masks1.to(self.device)  # (B, traj_B, seq_len)
+                traj2 = traj2.to(self.device)  # (B, traj_B, seq_len, feat_dim)
+                padding_masks2 = padding_masks2.to(self.device)  # (B, traj_B, seq_len)
+                traf_X = traf_X.to(self.device)  # (B, T, N, D)
+                traf_Y = traf_Y.to(self.device)  # (B, T, N, D)
+                out_lap_pos_enc = self.out_lap_mx.to(self.device)
+                in_lap_pos_enc = self.in_lap_mx.to(self.device)
+                if self.random_flip:
+                    out_sign_flip = torch.rand(out_lap_pos_enc.size(1)).to(self.device)
+                    out_sign_flip[out_sign_flip >= 0.5] = 1.0
+                    out_sign_flip[out_sign_flip < 0.5] = -1.0
+                    out_lap_pos_enc = out_lap_pos_enc * out_sign_flip.unsqueeze(0)
+                    in_sign_flip = torch.rand(in_lap_pos_enc.size(1)).to(self.device)
+                    in_sign_flip[in_sign_flip >= 0.5] = 1.0
+                    in_sign_flip[in_sign_flip < 0.5] = -1.0
+                    in_lap_pos_enc = in_lap_pos_enc * in_sign_flip.unsqueeze(0)
+
+                pred_next_traf, pred_masked_traj, pred_masked_time, pool_out_traj1, pool_out_traj2, pool_drn_out_traj = self.model(
+                traf_X, out_lap_pos_enc, in_lap_pos_enc,
+                traj1, padding_masks1, traj2, padding_masks2,
+                traj, padding_masks, batch_temporal_mat=None,
+                graph_dict=self.graph_dict,
+                )  # (B, N, 1), (B, traj_B, seq_len, vocab_size), (B, traj_B, seq_len)
+
+                true_next_traf = self._scaler.inverse_transform(traf_Y[..., :self.output_dim].squeeze(1))
+                pred_next_traf = self._scaler.inverse_transform(pred_next_traf[..., :self.output_dim])
+                traf_loss = loss.masked_mae_torch(pred_next_traf, true_next_traf, 0)
+
+                targets_time = targets[..., 1].float() / 60.0  # (B, traj_B, seq_len)
+                time_loss = torch.zeros(1, dtype=torch.float32).to(self.device)
+                if pred_masked_time is not None:
+                    time_loss = loss.masked_mae_torch(pred_masked_time, targets_time, 0)
+
+                targets = targets[..., 0]  # (B, traj_B, seq_len)
+                target_masks = target_masks[..., 0]  # (B, traj_B, seq_len)
+                targets = targets.view(-1, targets.shape[-1])  # (B * traj_B, seq_len)
+                target_masks = target_masks.view(-1, target_masks.shape[-1])  # (B * traj_B, seq_len)
+                # (B * traj_B, seq_len, vocab_size)
+                pred_masked_traj = pred_masked_traj.view(-1, pred_masked_traj.shape[-2], pred_masked_traj.shape[-1])
+                traj_loss_list = self.criterion(pred_masked_traj.transpose(1, 2), targets)
+                traj_batch_loss = torch.sum(traj_loss_list)
+                num_active = target_masks.sum()
+                traj_loss = traj_batch_loss / num_active
+
+                match_loss = torch.zeros(1, dtype=torch.float32).to(self.device)
+                if pool_drn_out_traj is not None and pool_out_traj2.shape[0] > 1:
+                    match_loss = self._cal_match_loss(pool_out_traj2, pool_drn_out_traj)
+
+                pool_out_traj1 = pool_out_traj1.view(-1, pool_out_traj1.shape[-1])
+                pool_out_traj2 = pool_out_traj2.view(-1, pool_out_traj2.shape[-1])
+                cont_loss = self._cal_cont_loss(pool_out_traj1, pool_out_traj2, self.cont_loss_type)
+
+                total_loss = traf_loss + traj_loss + time_loss + cont_loss + match_loss
+
+                if self.test_align_uniform:
+                    align_uniform_loss, align_loss, uniform_loss = self.align_uniform(pool_out_traj1, pool_out_traj2)
+
+                if self.l2_reg is not None:
+                    total_loss += self.l2_reg * loss.l2_reg_loss(self.model)
+
+                total_loss = total_loss / self.grad_accmu_steps
+                batches_seen += 1
+
+                total_loss.backward()
+                if self.clip_grad_norm:
+                    nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+
+                if batches_seen % self.grad_accmu_steps == 0:
+                    self.optimizer.step()
+                    if self.lr_scheduler_type == 'cosinelr' and self.lr_scheduler is not None:
+                        self.lr_scheduler.step_update(num_updates=batches_seen // self.grad_accmu_steps)
+                    self.optimizer.zero_grad()
+
+                with torch.no_grad():
+                    mask_label = targets[target_masks]
+                    lm_output = pred_masked_traj[target_masks].argmax(dim=-1)
+                    assert mask_label.shape == lm_output.shape
+                    correct = mask_label.eq(lm_output).sum().item()
+                    total_correct += correct
+                    total_active_elements += num_active.item()
+                    traj_epoch_loss += traj_batch_loss.item()
+                    traf_epoch_loss += traf_loss.item()
+                    time_epoch_loss += time_loss.item()
+                    cont_epoch_loss += cont_loss.item()
+                    match_epoch_loss += match_loss.item()
+
+                post_fix = {
+                    "mode": "Train",
+                    "epoch": epoch_idx,
+                    "iter": i,
+                    "lr": self.optimizer.param_groups[0]['lr'],
+                    "traf_loss": traf_loss.item(),
+                    "traj_loss": traj_loss.item(),
+                    "time_loss": time_loss.item(),
+                    "cont_loss": cont_loss.item(),
+                    "match_loss": match_loss.item(),
+                    "acc(%)": total_correct / total_active_elements * 100,
+                }
+                if self.test_align_uniform:
+                    post_fix['align_loss'] = align_loss
+                    post_fix['uniform_loss'] = uniform_loss
+                if i % self.log_batch == 0:
+                    self._logger.info(str(post_fix))
+
+            traf_epoch_loss = traf_epoch_loss / len(train_dataloader)
+            traj_epoch_loss = traj_epoch_loss / total_active_elements
+            time_epoch_loss = time_epoch_loss / len(train_dataloader)
+            cont_epoch_loss = cont_epoch_loss / len(train_dataloader)
+            match_epoch_loss = match_epoch_loss / len(train_dataloader)
+            total_correct = total_correct / total_active_elements * 100.0
+            self._logger.info(
+                f"Train: expid = {self.exp_id}, Epoch = {epoch_idx}, traf_avg_loss = {traf_epoch_loss},\
+                traj_avg_loss = {traj_epoch_loss}, time_avg_loss = {time_epoch_loss}, cont_avg_loss = {cont_epoch_loss},\
+                match_avg_loss = {match_epoch_loss}, total_acc = {total_correct}%."
+            )
+            epoch_loss = traf_epoch_loss + traj_epoch_loss + time_epoch_loss + cont_epoch_loss + match_epoch_loss
+            self._writer.add_scalar('Train loss', epoch_loss, epoch_idx)
+            self._writer.add_scalar('Train acc', total_correct, epoch_idx)
+            return epoch_loss, batches_seen

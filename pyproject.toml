@@ -1,0 +1,22 @@
+[project]
+name = "traffic-benchmark"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "geopandas>=1.1.1",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.6",
+    "scikit-learn>=1.7.2",
+    "scipy>=1.15.3",
+    "torch>=2.8.0",
+    "torchaudio>=2.8.0",
+    "torchvision>=0.23.0",
+    "tqdm>=4.67.1",
+    "wandb>=0.22.1",
+]
+
+[tool.uv.pip]
+index-url = "https://pypi.org/simple"
+extra-index-url = ["https://download.pytorch.org/whl/cu118"]
