@@ -1,6 +1,6 @@
 import os
 import torch
-from models import MDTP, MDTPSingle, Trajnet, TrGNN, TRACK_TRLLM_Cont, TRACK_DRNTRLTSP
+from models import MDTP, MDTPSingle, Trajnet, TrGNN
 
 
 class Exp_Basic(object):
@@ -10,9 +10,7 @@ class Exp_Basic(object):
             'MDTP': MDTP,
             'MDTPmini': MDTPSingle,
             'Trajnet': Trajnet,
-            'TrGNN': TrGNN,
-            'TRACK_TRLLM_Cont': TRACK_TRLLM_Cont,
-            'TRACK_DRNTRLTSP': TRACK_DRNTRLTSP
+            'TrGNN': TrGNN
         }
         if args.model == 'Mamba':
             print('Please make sure you have successfully installed mamba_ssm')
