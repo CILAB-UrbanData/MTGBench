@@ -30,6 +30,14 @@ def match_loss(traj_repr, node_repr_avg, temperature=0.1):
 def next_state_loss(pred, true):
     return torch.nn.functional.l1_loss(pred, true)
 
+def mask_state_loss(pred_next_mask, true_next_mask, mask_T):
+    if mask_T.sum() == 0:
+        return torch.tensor(0.0, device=pred_next_mask.device, requires_grad=True)
+    return F.mse_loss(pred_next_mask, true_next_mask)
+
+def match_nt_xent(traj_repr, node_avg, temperature=0.1):
+    return nt_xent_loss(traj_repr, node_avg, temperature)
+
 def RSE(pred, true):
     return np.sqrt(np.sum((true - pred) ** 2)) / np.sqrt(np.sum((true - true.mean()) ** 2))
 

@@ -88,7 +88,7 @@ class Model(nn.Module):
         self.traf_gat = CrossSparseGAT(args)         # traffic view internal / graph GAT（可接受 P_edge）
         self.traf_trans = TrafficTransformer(args)
         self.traj_trans = TrajectoryTransformer(args)
-        self.coatt_blocks = nn.ModuleList([CoAttLayer(args) for _ in range(getattr(args, 'n_coatt_layers', 1))])
+        self.coatt_blocks = nn.ModuleList([CoAttLayer(args) for _ in range(getattr(args, 'n_coatt_layers', 2))])
         self.state_head = nn.Linear(args.d_model, getattr(args, 'state_out_dim', 2))
 
     # ---------------- 论文公式 (7)/(8)：按时间片 t 使用 P_edge_t（trajectory internal transition-aware GAT） ------------
