@@ -48,35 +48,23 @@ except Exception:
     nx = None
 
 # -------------------- 辅助函数 --------------------
-def build_segment_vocab_from_trajs_and_edge(raw_map, roadid_col=None, out_vocab_file=None):
+def build_full_segment_vocab_from_trajs_and_edge(raw_map, roadid_col=None, out_vocab_file=None):
     """
-    从 raw_map文件构造 segment vocabulary（road_id -> idx）。
-    输入格式期望：
-      - raw_map: 每行 "fid, length" 的 csv 或 shapefile（shapefile 中 fid 列为 road_id）
-    实际上只要能从raw_map 文件里抽出所有 road_id 即可。
-    返回: segment2idx (dict), idx2segment (list)
+    从 raw_map 文件构造 segment vocabulary（road_id -> idx）。
     """
     segs = set()
     if os.path.exists(raw_map):
-        cols_to_keep = [roadid_col,"length"]  
-        cols_to_copy = [roadid_col]  # 只保留的列名称
-        new_col_name = "weight"    # 新增列名称
-        speed = 583                # 速度，单位：m/min 约等于 35km/h
+        cols_to_keep = [roadid_col, "length"]
+        cols_to_copy = [roadid_col]
+        new_col_name = "weight"
+        speed = 583  # m/min ~ 35km/h
         gdf = gpd.read_file(raw_map)
-        # 检查并只保留指定列 + geometry
         missing_cols = [c for c in cols_to_keep if c not in gdf.columns]
         if missing_cols:
             raise ValueError(f"以下字段在源文件中不存在: {missing_cols}")
-
         new_gdf = gdf[cols_to_copy].copy()
-        new_gdf.rename(columns={roadid_col:"road_id"}, inplace=True)
-
-        original_length = gdf["length"]
-        # 计算时间（分钟）
-        travel_time = original_length / speed
-
-        # 添加新字段并赋值
-        new_gdf[new_col_name] = travel_time
+        new_gdf.rename(columns={roadid_col: "road_id"}, inplace=True)
+        # 可选：travel_time = gdf["length"] / speed  # 未实际使用
         for rid in new_gdf["road_id"]:
             try:
                 segs.add(int(rid))
@@ -93,101 +81,80 @@ def build_segment_vocab_from_trajs_and_edge(raw_map, roadid_col=None, out_vocab_
             pickle.dump({'seg2idx': seg2idx, 'idx2seg': idx2seg}, fh)
     return seg2idx, idx2seg
 
+
 def build_static_features_for_segments(idx2seg, raw_map, feature_cols, static_file, roadid_col=None):
     """
     从 raw_map 文件中提取静态特征（按 segment id 顺序排列）。
-    输入格式期望：
-      - raw_map: 每行 "fid, length, feature1, feature2, ..." 的 csv 或 shapefile
-      - feature_cols: 需要提取的列名列表（必须在 raw_map 中存在）
     返回: static_features (N_seg x C_static) np.ndarray
     """
-    segs = set()
-    if os.path.exists(raw_map):
-        cols_to_keep = [roadid_col] + feature_cols  
-        gdf = gpd.read_file(raw_map)
-        # 检查并只保留指定列 + geometry
-        missing_cols = [c for c in cols_to_keep if c not in gdf.columns]
-        if missing_cols:
-            raise ValueError(f"以下字段在源文件中不存在: {missing_cols}")
-
-        new_gdf = gdf[cols_to_keep].copy()
-        new_gdf.rename(columns={roadid_col:"road_id"}, inplace=True)
-
-        # 先对 feature_cols 做批量数值化处理：
-        # 1) 尝试 pd.to_numeric(errors='coerce')
-        # 2) 对仍为 NaN 的字符串尝试 ast.literal_eval（若为 list/tuple 则取最大数值），
-        #    或用正则从字符串中抽取数字
-        # 3) 用列均值填充剩下的 NaN
-        proc_df = new_gdf[feature_cols].copy()
-
-        def try_extract_numeric_from_str(s):
-            # None/NaN
-            if s is None:
-                return None
-            # 如果已经是数字类型
-            if isinstance(s, (int, float, np.number)):
-                try:
-                    return float(s)
-                except Exception:
-                    return None
-            # 尝试 literal_eval（处理 ['2','3'] 之类）
-            try:
-                val = ast.literal_eval(s)
-                if isinstance(val, (list, tuple)) and len(val) > 0:
-                    nums = []
-                    for x in val:
-                        try:
-                            nums.append(float(x))
-                        except Exception:
-                            continue
-                    if len(nums) > 0:
-                        return float(max(nums))
-                if isinstance(val, (int, float, np.number)):
-                    return float(val)
-            except Exception:
-                pass
-            # 最后尝试正则抽取数字
-            try:
-                parts = re.findall(r"[-+]?\d*\.\d+|\d+", str(s))
-                if parts:
-                    # 取最后一个数字（通常代表最大或关键词处的数）
-                    return float(parts[-1])
-            except Exception:
-                pass
-            return None
-
-        for col in feature_cols:
-            # first pass: numeric coercion
-            coerced = pd.to_numeric(proc_df[col], errors='coerce')
-            proc_df[col] = coerced
-            # second pass: try parse remaining non-numeric strings
-            na_mask = proc_df[col].isna() & new_gdf[col].notna()
-            if na_mask.any():
-                # apply parser only on the problematic entries
-                parsed_vals = proc_df.loc[na_mask, col].copy()
-                for idx_row in proc_df.loc[na_mask].index:
-                    raw = new_gdf.at[idx_row, col]
-                    parsed = try_extract_numeric_from_str(raw)
-                    if parsed is not None:
-                        proc_df.at[idx_row, col] = parsed
-            # fill remaining NaN with column mean (or 0 if mean is NaN)
-            col_mean = proc_df[col].dropna().astype(float).mean()
-            if np.isnan(col_mean):
-                col_mean = 0.0
-            proc_df[col] = proc_df[col].fillna(col_mean).astype(np.float32)
-
-        # 构建 road_id -> features 映射
-        roadid_to_features = {}
-        for i, row in new_gdf.iterrows():
-            rid = row["road_id"]
-            try:
-                rid_key = int(rid)
-            except Exception:
-                rid_key = rid
-            feats = proc_df.loc[i, feature_cols].to_numpy(dtype=np.float32)
-            roadid_to_features[rid_key] = feats
-    else:
+    if not os.path.exists(raw_map):
         raise ValueError(f"raw_map file {raw_map} not found")
+
+    cols_to_keep = [roadid_col] + feature_cols
+    gdf = gpd.read_file(raw_map)
+    missing_cols = [c for c in cols_to_keep if c not in gdf.columns]
+    if missing_cols:
+        raise ValueError(f"以下字段在源文件中不存在: {missing_cols}")
+
+    new_gdf = gdf[cols_to_keep].copy()
+    new_gdf.rename(columns={roadid_col: "road_id"}, inplace=True)
+    proc_df = new_gdf[feature_cols].copy()
+
+    def try_extract_numeric_from_str(s):
+        if s is None:
+            return None
+        if isinstance(s, (int, float, np.number)):
+            try:
+                return float(s)
+            except Exception:
+                return None
+        try:
+            val = ast.literal_eval(s)
+            if isinstance(val, (list, tuple)) and len(val) > 0:
+                nums = []
+                for x in val:
+                    try:
+                        nums.append(float(x))
+                    except Exception:
+                        continue
+                if len(nums) > 0:
+                    return float(max(nums))
+            if isinstance(val, (int, float, np.number)):
+                return float(val)
+        except Exception:
+            pass
+        try:
+            parts = re.findall(r"[-+]?\d*\.\d+|\d+", str(s))
+            if parts:
+                return float(parts[-1])
+        except Exception:
+            pass
+        return None
+
+    for col in feature_cols:
+        coerced = pd.to_numeric(proc_df[col], errors='coerce')
+        proc_df[col] = coerced
+        na_mask = proc_df[col].isna() & new_gdf[col].notna()
+        if na_mask.any():
+            for idx_row in proc_df.loc[na_mask].index:
+                raw = new_gdf.at[idx_row, col]
+                parsed = try_extract_numeric_from_str(raw)
+                if parsed is not None:
+                    proc_df.at[idx_row, col] = parsed
+        col_mean = proc_df[col].dropna().astype(float).mean()
+        if np.isnan(col_mean):
+            col_mean = 0.0
+        proc_df[col] = proc_df[col].fillna(col_mean).astype(np.float32)
+
+    roadid_to_features = {}
+    for i, row in new_gdf.iterrows():
+        rid = row["road_id"]
+        try:
+            rid_key = int(rid)
+        except Exception:
+            rid_key = rid
+        feats = proc_df.loc[i, feature_cols].to_numpy(dtype=np.float32)
+        roadid_to_features[rid_key] = feats
 
     N = len(idx2seg)
     C = len(feature_cols)
@@ -195,37 +162,29 @@ def build_static_features_for_segments(idx2seg, raw_map, feature_cols, static_fi
     for i, seg in enumerate(idx2seg):
         if seg in roadid_to_features:
             static_features[i] = roadid_to_features[seg]
-        else:
-            # 若某些 segment 在 raw_map 中没有对应的特征，则保持为零向量
-            pass
     np.save(static_file, static_features)
     return static_features
+
 
 def convert_traj2flow(traj_file, N, idx2seg=None):
     records = []
     traj_df = pd.read_csv(traj_file, header=None)
-    traj_df.columns = ['driver','traj_id','start_end', 'traj']
+    traj_df.columns = ['driver', 'traj_id', 'start_end', 'traj']
 
-    # 先安全解析所有轨迹列（使用 ast.literal_eval），并对每条轨迹内部的时间戳进行向量化转换
     for raw_traj in tqdm(traj_df['traj'], total=len(traj_df), desc='parse trajs'):
         try:
             traj_list = ast.literal_eval(raw_traj)
         except Exception:
-            # 无法解析则跳过该轨迹
             continue
         if not traj_list:
             continue
 
-        # 提取 segment id 和时间戳列表
         seg_ids = [seg[0] for seg in traj_list]
         ts_vals = [seg[1] for seg in traj_list]
 
-        # 尝试数值化（秒或毫秒）
         ts_numeric = pd.to_numeric(pd.Series(ts_vals), errors='coerce')
         if ts_numeric.notna().any():
-            # 对能解析为数值的项，统一处理；对 NaN 项在后续回退为字符串解析
             ts_arr = ts_numeric.values.astype('float64')
-            # 判断是否存在毫秒数值（非常大），若存在则将其缩放到秒
             if (ts_arr > 1e12).sum() > 0:
                 ts_arr = ts_arr / 1000.0
             try:
@@ -235,56 +194,42 @@ def convert_traj2flow(traj_file, N, idx2seg=None):
                 dt_index = pd.to_datetime(pd.Series(ts_vals).astype(str), errors='coerce')
                 dt_floored = dt_index.dt.floor('10min')
         else:
-            # 全部不能解析为数值，回退为字符串解析
             dt_index = pd.to_datetime(pd.Series(ts_vals).astype(str), errors='coerce')
             dt_floored = dt_index.dt.floor('10min')
 
-        # 批量加入 records，跳过无法解析的时间点
         for sid, dt_val in zip(seg_ids, dt_floored):
             if pd.isna(dt_val):
                 continue
             records.append((sid, dt_val))
 
     stat_df = pd.DataFrame(records, columns=['segment_id', 'time_bin'])
-
-    # 统计每条segment每10分钟的车辆数
     result = stat_df.groupby(['segment_id', 'time_bin']).size().reset_index(name='car_count')
 
-    # 生成完整的时间索引和所有 segment（保持 time_bin 为 index，不把它变成列）
-    # 如果提供了 idx2seg，则使用 idx2seg 的顺序保证导出的列顺序与 vocabulary 对齐
     if idx2seg is not None:
         all_segments = list(idx2seg)
     else:
-        all_segments = list(np.arange(0, N))  # sf_100 segment_id从0到26658，若不想全部输出，则可以不填self.N
+        all_segments = list(np.arange(0, N))
 
     full_time_index = pd.date_range(stat_df['time_bin'].min(), stat_df['time_bin'].max(), freq='10min')
 
-    # 透视表并补全缺失（不要 reset_index，这样 time_bin 保持为 index）
     pivot = result.pivot(index='time_bin', columns='segment_id', values='car_count')
-    # 使用 all_segments 做 reindex，保证列完整且按 idx2seg 顺序排列（若 idx2seg 提供）
     pivot = pivot.reindex(index=full_time_index, columns=all_segments, fill_value=0)
     pivot = pivot.fillna(0)
-
-    # 直接按 all_segments 的顺序取列，保证与 idx2seg 对齐
     pivot_matrix = pivot[all_segments]
 
-    # 将 pivot_matrix 转为 numpy（整型）并在末尾增加一个长度为1的维度，便于后续与模型期望的形状对齐
-    # 结果形状: (T, N, 1)
-    # 注意：这里我们显式使用整型（int32），因为 car_count 是计数值
     pivot_array = pivot_matrix.to_numpy(dtype=np.int32)
     pivot_array = pivot_array[..., np.newaxis]
     np.save(os.path.join(os.path.dirname(traj_file), 'flow.npy'), pivot_array)
     return pivot_array
 
+
 def parse_points_from_field(field_value: str):
     """
-    把类似字符串解析为 [(road_id, timestamp(int), lon, lat), ...]
-    使用 ast.literal_eval 做安全解析。
+    把类似字符串解析为 [(road_id, timestamp(int), ...), ...]
     """
     if pd.isna(field_value):
         return []
     s = field_value
-    # 若字段被额外双引号包裹（例如 CSV 导出时），去掉外层双引号再试
     if isinstance(s, str):
         s_strip = s.strip()
         if s_strip.startswith('"') and s_strip.endswith('"'):
@@ -292,61 +237,43 @@ def parse_points_from_field(field_value: str):
     try:
         pts = ast.literal_eval(s)
     except Exception as e:
-        # 抛出具体错误以便定位问题
         raise ValueError(f"无法解析轨迹点字符串: {e} -- 原始值片段: {str(s)[:200]!r}")
     norm = []
     for p in pts:
         if not isinstance(p, (list, tuple)) or len(p) < 2:
             continue
         road_id = p[0]
-        # timestamp 在示例中是第二个元素
         try:
             timestamp = int(float(p[1]))
         except Exception:
-            # 不能解析 timestamp 时跳过该点
             continue
-        # 有些情况下经纬出现在 p[2],p[3]，但我们这里不需要 lon/lat
         norm.append((road_id, timestamp))
     return norm
 
+
 def build_full_edges_from_shp_using_vocab(shp_path,
-                                         seg2idx,
-                                         roadid_col='fid',
-                                         from_col='u',
-                                         to_col='v',
-                                         geom_col='geometry',
-                                         assume_uv_present=True,
-                                         coord_round=6,
-                                         verbose=True,
-                                         skip_missing=True):
+                                          seg2idx,
+                                          roadid_col='fid',
+                                          from_col='u',
+                                          to_col='v',
+                                          geom_col='geometry',
+                                          assume_uv_present=True,
+                                          coord_round=6,
+                                          verbose=True,
+                                          skip_missing=True):
     """
-    使用已有 seg2idx (roadid -> seg_idx) 从 shapefile 构建 full_edge_index（segment-level adjacency）。
-    参数:
-      - shp_path: path to edge.shp
-      - seg2idx: dict {roadid -> seg_idx} 已存在的 vocabulary
-      - roadid_col: shapefile 中表示 road id 的列名
-      - from_col, to_col: 可选列（若存在并且 assume_uv_present=True 则优先使用）
-      - geom_col: geometry 列名（通常 'geometry'）
-      - assume_uv_present: 如果 True 且 from_col/to_col 存在，则会用这些 node id 辅助判断相邻关系
-      - coord_round: 若使用 geometry 推断端点，则坐标四舍五入精度
-      - skip_missing: 如果 shp 中出现的 roadid 不在 seg2idx 中，True -> 跳过并记录, False -> 抛错
-    返回:
-      - full_edge_index: torch.LongTensor (2 x E) (src_seg_idx, dst_seg_idx)
-      - info: dict 包含统计信息（num_features, missing_roadids, num_edges）
+    使用已有 seg2idx 从 shapefile 构建 full_edge_index（segment-level adjacency）。
     """
     gdf = gpd.read_file(shp_path)
     if verbose:
         print(f"[shp->full_edges] load {len(gdf)} features from {shp_path}")
 
-    # 检查字段
     if roadid_col not in gdf.columns:
         raise ValueError(f"roadid_col '{roadid_col}' not found in shapefile columns: {gdf.columns.tolist()}")
 
-    # 遍历 shapefile，收集每条 segment 的 (seg_idx, start_node_key, end_node_key)
-    # 如果 shapefile 包含 explicit from_col/to_col 使用它们（但仍以 seg2idx 的 roadid 映射为主）
     seg_to_endpoints = {}   # seg_idx -> (start_key, end_key)
     missing_roadids = set()
-    coord_map = {}  # rounded coord -> node_key  (only used if using geometry)
+    coord_map = {}
     next_coord_node = 0
 
     use_uv = assume_uv_present and (from_col in gdf.columns) and (to_col in gdf.columns)
@@ -355,7 +282,6 @@ def build_full_edges_from_shp_using_vocab(shp_path,
 
     for i, row in gdf.iterrows():
         raw_rid = row[roadid_col]
-        # try normalize numeric if stored as float/int-like strings
         try:
             rid_key = int(raw_rid)
         except Exception:
@@ -372,7 +298,6 @@ def build_full_edges_from_shp_using_vocab(shp_path,
 
         if use_uv:
             u_raw = row[from_col]; v_raw = row[to_col]
-            # normalize if numeric-like
             try:
                 u_key = int(u_raw)
             except:
@@ -385,52 +310,43 @@ def build_full_edges_from_shp_using_vocab(shp_path,
         else:
             geom = row[geom_col]
             if geom is None:
-                # skip or raise
                 if verbose:
                     print(f"[shp->full_edges] warning: seg {rid_key} has no geometry, skipping")
                 continue
-            # handle LineString or MultiLineString
             try:
                 coords = list(geom.coords)
             except Exception:
-                # MultiLineString -> take first part
                 if geom.geom_type == 'MultiLineString':
                     coords = list(list(geom)[0].coords)
                 else:
                     raise
             start = coords[0]; end = coords[-1]
-            # round coords to reduce tiny differences
             start_k = (round(float(start[0]), coord_round), round(float(start[1]), coord_round))
             end_k = (round(float(end[0]), coord_round), round(float(end[1]), coord_round))
-            # map to synthetic node keys (stringify to avoid colliding with numeric node ids)
             if start_k not in coord_map:
                 coord_map[start_k] = f"c{next_coord_node}"; next_coord_node += 1
             if end_k not in coord_map:
                 coord_map[end_k] = f"c{next_coord_node}"; next_coord_node += 1
-            seg_to_endpoints[seg_idx] = (( "coord", coord_map[start_k] ), ( "coord", coord_map[end_k] ))
+            seg_to_endpoints[seg_idx] = (("coord", coord_map[start_k]), ("coord", coord_map[end_k]))
 
     if verbose:
         print(f"[shp->full_edges] found {len(seg_to_endpoints)} segments matched to vocab; {len(missing_roadids)} missing roadids")
 
-    # Build reverse index: start_key -> list of seg_idx, end_key -> seg_idx
     start_to_segs = defaultdict(list)
     end_of_seg = {}
     for seg_idx, (start_key, end_key) in seg_to_endpoints.items():
         start_to_segs[start_key].append(seg_idx)
         end_of_seg[seg_idx] = end_key
 
-    # For each segment A, find B s.t. end(A) == start(B)
-    src_list = []
-    dst_list = []
+    src_list, dst_list = [], []
     for A, end_key in end_of_seg.items():
-        # find segments whose start_key equals this end_key
         b_list = start_to_segs.get(end_key, [])
         for B in b_list:
             src_list.append(A)
             dst_list.append(B)
 
     if len(src_list) == 0:
-        fe = np.zeros((2,0), dtype=np.int64)
+        fe = np.zeros((2, 0), dtype=np.int64)
     else:
         fe = np.stack([np.array(src_list, dtype=np.int64), np.array(dst_list, dtype=np.int64)], axis=0)
 
@@ -446,55 +362,36 @@ def build_full_edges_from_shp_using_vocab(shp_path,
 
     return torch.LongTensor(fe), info
 
+
 def compute_P_time_from_transitions(full_edge_index, transitions_dict, num_time_bins):
-    """
-    从 transitions_dict {(i,j): [dt_samples]} 估计 per-edge log-prob P_time（按时间 bin）
-    简化实现：只统计转移频次以得到 P(edge|src) 的概率（按时间 bin 暂用同一分布，若没有时间维度只返回 single）
-    因为 transitions_dict 包含 dt（时间差）并非发生时刻；如果轨迹带有发生时刻并按 bin 统计更好。
-    这里我们做较简单的频次统计：P_time[tb, e] = log( count_tb(src->dst)/sum_dst count_tb(src->*) )
-    但要做到 "time-dependent"，我们需要轨迹中带发生时刻并按时间 bin 统计源-目的对的出现次数。
-    若轨迹中没有明确发生时刻信息（或不做 bin），返回 single-row P (1 x E_full)。
-    """
-    # simple fallback: if transitions_dict provided but no per-bin info, build a single time bin
     E = full_edge_index.shape[1]
-    # build mapping from pair -> idx
-    pair_to_idx = {(int(full_edge_index[0,i]), int(full_edge_index[1,i])): i for i in range(E)}
-    # counts per src
+    pair_to_idx = {(int(full_edge_index[0, i]), int(full_edge_index[1, i])): i for i in range(E)}
     src_counts = defaultdict(float)
     pair_count_arr = np.zeros((E,), dtype=np.float32)
-    for (i,j), samples in transitions_dict.items():
-        if (i,j) in pair_to_idx:
-            idx = pair_to_idx[(i,j)]
+    for (i, j), samples in transitions_dict.items():
+        if (i, j) in pair_to_idx:
+            idx = pair_to_idx[(i, j)]
             pair_count_arr[idx] = float(len(samples))
             src_counts[i] += float(len(samples))
-    # normalize per src
     probs = np.zeros_like(pair_count_arr, dtype=np.float32)
     for e_idx in range(E):
         s = int(full_edge_index[0, e_idx])
         denom = src_counts.get(s, 1.0)
         probs[e_idx] = pair_count_arr[e_idx] / (denom + 1e-12)
     logp = np.log(probs + 1e-9)
-    P_time = logp.reshape(1, E)  # 1 x E (no temporal bins)
-    # Note: if you have time-of-day info per transition, you can make it num_time_bins x E
+    P_time = logp.reshape(1, E)
     return P_time
 
+
 def compute_travel_time_matrix_from_transitions(full_edge_index, transitions_dict, N):
-    """
-    基于 transitions_dict 中的 dt 样本估计边权（单条边权），并用 Dijkstra 得到 shortest-path travel time matrix。
-    如果 transitions_dict 没有覆盖某些直接边，边权设为 large。
-    返回 T (N x N) matrix with estimated shortest travel-time (minutes), np.inf if unreachable.
-    """
     if nx is None:
-        # fallback: build trivial matrix where direct transitions time = median(dt) if exists, else inf
         T = np.full((N, N), np.inf, dtype=np.float32)
-        for (i,j), samples in transitions_dict.items():
+        for (i, j), samples in transitions_dict.items():
             T[int(i), int(j)] = float(np.median(samples))
         return T
-    # build graph
     G = nx.DiGraph()
     G.add_nodes_from(range(N))
-    # assign weight for edges present
-    for (i,j), samples in transitions_dict.items():
+    for (i, j), samples in transitions_dict.items():
         median_t = float(np.median(samples))
         G.add_edge(int(i), int(j), time=median_t)
     T = np.full((N, N), np.inf, dtype=np.float32)
@@ -504,32 +401,30 @@ def compute_travel_time_matrix_from_transitions(full_edge_index, transitions_dic
             T[i, int(j)] = tt
     return T
 
+
 def build_kmin_reachable_edges_from_travel_time_matrix(travel_time_matrix, K_min):
     tt = np.array(travel_time_matrix)
     N = tt.shape[0]
-    src_list = []
-    dst_list = []
+    src_list, dst_list = [], []
     for i in range(N):
         row = tt[i]
         mask = (row > 0) & (row <= K_min) & np.isfinite(row)
         idxs = np.nonzero(mask)[0]
         if idxs.size:
-            src_list.extend([i]*idxs.size)
+            src_list.extend([i] * idxs.size)
             dst_list.extend(idxs.tolist())
     if len(src_list) == 0:
-        return np.zeros((2,0), dtype=np.int64)
+        return np.zeros((2, 0), dtype=np.int64)
     return np.stack([np.array(src_list, dtype=np.int64), np.array(dst_list, dtype=np.int64)], axis=0)
 
+
 def build_khop_edges_from_full_edges(full_edge_index, k):
-    """
-    基于 full_edge_index（2 x E_full，src,dst）构造 k-hop reachability edges。
-    返回 edge_index_khop (2 x E_k)
-    """
     src = full_edge_index[0]; dst = full_edge_index[1]
-    N = int(max(src.max(), dst.max()) + 1)
-    # build adjacency
+    if src.numel() == 0:
+        return np.zeros((2, 0), dtype=np.int64)
+    N = int(max(src.max().item(), dst.max().item()) + 1)
     adj = [[] for _ in range(N)]
-    for u, v in zip(src, dst):
+    for u, v in zip(src.tolist(), dst.tolist()):
         adj[int(u)].append(int(v))
     srcs, dsts = [], []
     from collections import deque
@@ -546,27 +441,15 @@ def build_khop_edges_from_full_edges(full_edge_index, k):
             for nb in adj[cur]:
                 if nb not in seen:
                     seen.add(nb)
-                    q.append((nb, dist+1))
+                    q.append((nb, dist + 1))
     if len(srcs) == 0:
-        return np.zeros((2,0), dtype=np.int64)
+        return np.zeros((2, 0), dtype=np.int64)
     return np.stack([np.array(srcs, dtype=np.int64), np.array(dsts, dtype=np.int64)], axis=0)
 
 # ------------------ Dataset 类 ------------------
 class SegmentRoadDataset(Dataset):
     """
     Dataset where each node is a road segment (road_id).
-    初始化参数:
-      data_root: 数据目录
-      edge_list_file: optional, 边表（若有）
-      traj_file: 必需，轨迹文件 (traj_id, timestamp, road_id)
-      static_file: optional, static features per segment (N_seg x C_static) (按 segment id 顺序或后续映射)
-      traffic_ts_file: optional, T_total x N_seg x C_state (若无可用在训练时填零或抛错)
-      num_time_bins: 时间片数量 (默认 24)
-      T_hist: traffic history length
-      K_min: K-minute 阈值（若无 travel_time 可选用 k_hop fallback）
-      cache_dir: 缓存路径
-      force_recompute: 是否强制重算缓存
-      khop_fallback: int or None, 若缺 travel_time 用多少 hop 作为替代
     """
     def __init__(self, data_root,
                  static_file=None,
@@ -580,7 +463,8 @@ class SegmentRoadDataset(Dataset):
                  K_min=15,
                  cache_dir='./cache',
                  force_recompute=False,
-                 khop_fallback=2):
+                 khop_fallback=2,
+                 min_flow_count=100):
         super().__init__()
         os.makedirs(cache_dir, exist_ok=True)
 
@@ -593,7 +477,7 @@ class SegmentRoadDataset(Dataset):
         if traj_file is None:
             traj_file = os.path.join(data_root, 'traj_train_100.csv')
         if roadid_col is None:
-            roadid_col = 'fid'  # default road id column in shapefile
+            roadid_col = 'fid'
         if feature_cols is None:
             feature_cols = ['length', 'lanes', 'oneway']
 
@@ -610,8 +494,9 @@ class SegmentRoadDataset(Dataset):
         self.cache_dir = cache_dir
         self.force_recompute = force_recompute
         self.khop_fallback = khop_fallback
+        self.min_flow_count = int(min_flow_count)
 
-        # 1) build segment vocab
+        # 1) 初始 vocab
         vocab_cache = os.path.join(cache_dir, 'segment_vocab.pkl')
         if os.path.exists(vocab_cache) and not force_recompute:
             with open(vocab_cache, 'rb') as fh:
@@ -619,107 +504,136 @@ class SegmentRoadDataset(Dataset):
                 self.seg2idx = tmp['seg2idx']
                 self.idx2seg = tmp['idx2seg']
         else:
-            self.seg2idx, self.idx2seg = build_segment_vocab_from_trajs_and_edge(self.road_shp_file, self.roadid_col, out_vocab_file=vocab_cache)
-        self.N = len(self.idx2seg) # TODO 清洗频率较低的road 加入 unk pad
+            self.seg2idx, self.idx2seg = build_full_segment_vocab_from_trajs_and_edge(
+                self.road_shp_file, self.roadid_col, out_vocab_file=vocab_cache
+            )
 
-        # 2) load static features (per segment)
-        if static_file is not None and os.path.exists(static_file):
-            self.static = torch.FloatTensor(np.load(static_file))  # expect N x C_static aligned to idx2seg order
-        else:
-            # fallback zero features
-            self.static = torch.FloatTensor(build_static_features_for_segments(self.idx2seg, self.road_shp_file,
-                                                              feature_cols=self.feature_cols, static_file=static_file, roadid_col=self.roadid_col))
-
-        # 3) traffic timeseries (optional)
+        # 2) traffic timeseries
         if traffic_ts_file is not None and os.path.exists(traffic_ts_file):
-            self.traffic_ts = np.load(traffic_ts_file)  # shape T_total x N_seg x C_state
+            self.traffic_ts = np.load(traffic_ts_file)  # T x N x C_state
             self.T_total, _, _ = self.traffic_ts.shape
         else:
             print(f"[Dataset] traffic_ts_file {traffic_ts_file} not found, will convert from traj_file")
-            # 传入 idx2seg 以保证生成的 timeseries 列顺序与 vocabulary 对齐
-            self.traffic_ts = convert_traj2flow(self.traj_file, self.N, idx2seg=self.idx2seg)
+            self.traffic_ts = convert_traj2flow(self.traj_file, len(self.idx2seg), idx2seg=self.idx2seg)
             self.T_total, _, _ = self.traffic_ts.shape
-            
-        # 4) parse trajectories into segment idx sequences and collect transitions
+
+        # 2.5) 低频过滤 -> UNK（仅当 min_flow_count > 0）
+        self.unk_idx = None
+        if self.min_flow_count > 0:
+            self._apply_min_freq_filter_and_add_unk()
+
+        # 计算 N_total / N_graph，并保留 self.N 兼容用法
+        self.N_total = len(self.idx2seg)                  # 含 UNK
+        self.N_graph = self.N_total - 1 if (self.unk_idx is not None) else self.N_total  # 图中有效节点数（不含 UNK）
+        self.N = self.N_total  # 兼容旧代码
+
+        # 3) static（对齐过滤后的 idx2seg；若有 UNK 末尾补 0）
+        if self.static_file is not None and os.path.exists(self.static_file):
+            static_loaded = np.load(self.static_file)
+            if static_loaded.shape[0] != len(self.idx2seg):
+                static_loaded = build_static_features_for_segments(
+                    self.idx2seg, self.road_shp_file,
+                    feature_cols=self.feature_cols,
+                    static_file=self.static_file, roadid_col=self.roadid_col
+                )
+            self.static = torch.FloatTensor(static_loaded)
+        else:
+            self.static = torch.FloatTensor(build_static_features_for_segments(
+                self.idx2seg, self.road_shp_file,
+                feature_cols=self.feature_cols, static_file=self.static_file, roadid_col=self.roadid_col
+            ))
+        if self.unk_idx is not None and self.static.shape[0] == (len(self.idx2seg) - 1):
+            pad = torch.zeros((1, self.static.shape[1]), dtype=self.static.dtype)
+            self.static = torch.vstack([self.static, pad])
+
+        # 4) 解析轨迹，并收集转移统计
         self.trajs_by_timebin = defaultdict(list)
         self.global_traj_pool = []
-        # We'll parse trajectories, and also collect transitions with dt if timestamps present
-        transitions_samples = defaultdict(list)  # (i,j) -> list of dt (minutes)
-        transitions_counts = Counter() 
+        transitions_samples = defaultdict(list)
+        transitions_counts = Counter()
 
         traj_df = pd.read_csv(self.traj_file, header=None)
-        traj_df.columns = ['driver','traj_id','start_end', 'traj']
+        traj_df.columns = ['driver', 'traj_id', 'start_end', 'traj']
         points_col = 'traj'
         traj_col = 'traj_id'
 
         out_rows = []
-        for idx, row in traj_df.iterrows():
+        for ridx, row in traj_df.iterrows():
             points_field = row.get(points_col)
             if pd.isna(points_field):
                 continue
             try:
                 pts = parse_points_from_field(points_field)
             except Exception as e:
-                print(f"Warning: cannot parse points in CSV row {idx}: {e}", file=sys.stderr)
+                print(f"Warning: cannot parse points in CSV row {ridx}: {e}", file=sys.stderr)
                 continue
-            traj_id = str(row.get(traj_col, idx))
+            traj_id = str(row.get(traj_col, ridx))
             for (road_id, ts) in pts:
                 out_rows.append((traj_id, int(ts), road_id))
 
         out_rows.sort(key=lambda x: (x[0], x[1]))
         traj_map = defaultdict(list)
         for traj_id, ts, raw in out_rows:
-            if raw not in self.seg2idx:
-                continue
-            seg = self.seg2idx[raw]
+            if raw in self.seg2idx:
+                seg = self.seg2idx[raw]
+            else:
+                if self.unk_idx is not None:
+                    seg = self.unk_idx
+                else:
+                    continue
             traj_map[traj_id].append((ts, seg))
+
         for traj_id, recs in traj_map.items():
             recs.sort()
             times = [r[0] for r in recs]
             nodes = [r[1] for r in recs]
-            # map times to bins
             bins = [int((t // 3600) % self.num_time_bins) for t in times]
             self.global_traj_pool.append((nodes, bins))
             if len(bins) > 0:
                 bin_idx = bins[-1]
                 self.trajs_by_timebin[bin_idx].append((nodes, bins))
-            # collect transitions
             for (t0, s0), (t1, s1) in zip(recs[:-1], recs[1:]):
                 transitions_counts[(s0, s1)] += 1
                 dt_min = (t1 - t0) / 60.0
                 transitions_samples[(s0, s1)].append(dt_min)
 
-        # 5) build full_edge_index (from observed transitions or edge_list if provided)
-        full_edge_cache = os.path.join(cache_dir, 'full_edge_index.npy')
-        if os.path.exists(full_edge_cache) and not force_recompute:
-            arr = np.load(full_edge_cache)
-            self.full_edge_index = torch.LongTensor(arr)
-        else:
-            fe_tensor, info = build_full_edges_from_shp_using_vocab(self.road_shp_file, self.seg2idx,
-                                                                        roadid_col=self.roadid_col,
-                                                                        from_col='u',
-                                                                        to_col='v',
-                                                                        assume_uv_present=True,
-                                                                        coord_round=6,
-                                                                        verbose=True,
-                                                                        skip_missing=True)
-            self.full_edge_index = fe_tensor
-            if info['num_missing_roadids'] > 0:
-                # 记录缺失并提示（但不阻塞）
-                print("[Dataset] Warning: some roadids in shp not in vocab (count=%d). Missing sample: %s" %
-                    (info['num_missing_roadids'], info['missing_roadids'][:10]))
-            np.save(full_edge_cache, self.full_edge_index.cpu().numpy())
+        # ====== 辅助: 缓存名签名 + 校验/清洗 ======
+        # 这三个方法定义为成员，供后续使用
+        # （为了让整文件自包含，直接写在类里，PyCharm/VSCode 可跳转）
+        # 已在本类下方实现：_edge_cache_name / _assert_edge_index_ok / _sanitize_edges
 
-        # 6) compute P_time (per-edge log-prob). If transitions provided, compute single-bin P_time
-        ptime_cache = os.path.join(cache_dir, f'P_time_{self.num_time_bins}.npy')
-        if os.path.exists(ptime_cache) and not force_recompute:
+        # 5) full_edge_index（从 shp，以当前 seg2idx 构建；缓存带签名）
+        full_edge_cache = self._edge_cache_name('full_edge_index')
+        need_build = True
+        if os.path.exists(full_edge_cache) and not self.force_recompute:
+            arr = np.load(full_edge_cache)
+            self.full_edge_index = torch.as_tensor(arr, dtype=torch.long)
+            if self._assert_edge_index_ok(self.full_edge_index, "full_edge_index(cache)"):
+                need_build = False
+            else:
+                print("[Dataset] full_edge_index cache invalid for current vocab; will rebuild.")
+        if need_build:
+            fe_tensor, info = build_full_edges_from_shp_using_vocab(
+                self.road_shp_file, self.seg2idx,
+                roadid_col=self.roadid_col, from_col='u', to_col='v',
+                assume_uv_present=True, coord_round=6, verbose=True, skip_missing=True
+            )
+            self.full_edge_index = self._sanitize_edges(fe_tensor, "full_edge_index(built)")
+            if info['num_missing_roadids'] > 0:
+                print("[Dataset] Warning: some roadids in shp not in vocab (count=%d). Missing sample: %s" %
+                      (info['num_missing_roadids'], info['missing_roadids'][:10]))
+            np.save(full_edge_cache, self.full_edge_index.cpu().numpy())
+        # 终态自检
+        assert self._assert_edge_index_ok(self.full_edge_index, "full_edge_index(final)"), "full_edge_index still invalid"
+
+        # 6) P_time（按当前 E_full 缓存带签名）
+        ptime_cache = self._edge_cache_name(f'P_time_{self.num_time_bins}')
+        if os.path.exists(ptime_cache) and not self.force_recompute:
             self.P_time = np.load(ptime_cache)
         else:
-            # if we have transitions_counts -> compute P per src
             if self.full_edge_index.numel() == 0:
                 self.P_time = np.zeros((1, 0), dtype=np.float32)
             else:
-                # compute pair->count mapping
                 E_full = self.full_edge_index.size(1)
                 srcs = self.full_edge_index[0].cpu().numpy()
                 dsts = self.full_edge_index[1].cpu().numpy()
@@ -737,51 +651,114 @@ class SegmentRoadDataset(Dataset):
                     probs[i_e] = counts[i_e] / (denom + 1e-12)
                 logp = np.log(probs + 1e-9)
                 self.P_time = logp.reshape(1, E_full)
-                np.save(ptime_cache, self.P_time)
+            np.save(ptime_cache, self.P_time)
 
-        # 7) build travel_time_matrix if dt samples available
-        tt_cache = os.path.join(cache_dir, 'travel_time.npy')
+        # 7) travel_time（如需，可释放注释）
         self.travel_time = None
-        # build transitions_samples mapping to pass to travel time estimator
         # if len(transitions_samples) > 0:
-        #     # if cache exists use it
-        #     if os.path.exists(tt_cache) and not force_recompute:
+        #     tt_cache = self._edge_cache_name('travel_time')
+        #     if os.path.exists(tt_cache) and not self.force_recompute:
         #         self.travel_time = np.load(tt_cache)
         #     else:
-        #         self.travel_time = compute_travel_time_matrix_from_transitions(self.full_edge_index.cpu().numpy(), transitions_samples, self.N)
+        #         self.travel_time = compute_travel_time_matrix_from_transitions(
+        #             self.full_edge_index.cpu().numpy(), transitions_samples, self.N_graph
+        #         )
         #         np.save(tt_cache, self.travel_time)
-        # else:
-        #     self.travel_time = None
 
-        # 8) build edge_index_kmin (K-minute neighborhood) - prefer travel_time if available, else fall back to khop
-        kmin_cache = os.path.join(cache_dir, f'edge_index_kmin_{self.K_min}.npy')
-        if os.path.exists(kmin_cache) and not force_recompute:
+        # 8) edge_index_kmin（缓存带签名 + 校验）
+        kmin_cache = self._edge_cache_name(f'edge_index_kmin_{self.K_min}')
+        need_build_k = True
+        if os.path.exists(kmin_cache) and not self.force_recompute:
             arr = np.load(kmin_cache, allow_pickle=False)
-            self.edge_index_kmin = torch.LongTensor(arr)
-        else:
+            self.edge_index_kmin = torch.as_tensor(arr, dtype=torch.long)
+            if self._assert_edge_index_ok(self.edge_index_kmin, "edge_index_kmin(cache)"):
+                need_build_k = False
+            else:
+                print("[Dataset] edge_index_kmin cache invalid for current vocab; will rebuild.")
+        if need_build_k:
             if self.travel_time is not None:
                 kmin = build_kmin_reachable_edges_from_travel_time_matrix(self.travel_time, self.K_min)
-                self.edge_index_kmin = torch.LongTensor(kmin)
+                self.edge_index_kmin = torch.as_tensor(kmin, dtype=torch.long)
             else:
-                # fallback: use khop over full_edge_index
                 if self.full_edge_index.numel() == 0:
-                    self.edge_index_kmin = torch.LongTensor(np.zeros((2,0), dtype=np.int64))
+                    self.edge_index_kmin = torch.zeros((2, 0), dtype=torch.long)
                 else:
-                    khop = build_khop_edges_from_full_edges(self.full_edge_index.cpu().numpy(), self.khop_fallback)
-                    self.edge_index_kmin = torch.LongTensor(khop)
+                    khop = build_khop_edges_from_full_edges(self.full_edge_index, self.khop_fallback)
+                    self.edge_index_kmin = torch.as_tensor(khop, dtype=torch.long)
+            self.edge_index_kmin = self._sanitize_edges(self.edge_index_kmin, "edge_index_kmin(built)")
             if self.edge_index_kmin.numel() > 0:
                 np.save(kmin_cache, self.edge_index_kmin.cpu().numpy())
+        assert self._assert_edge_index_ok(self.edge_index_kmin, "edge_index_kmin(final)"), "edge_index_kmin still invalid"
 
-        # 9) prepare sample time idxs
+        # 9) sample time idxs
         if self.traffic_ts is None or self.T_total == 0:
-            # we will sample only based on traj bins if traffic not available; create a fake time axis from traj bins
-            # produce sample_time_idxs as available time bins present
             self.sample_time_idxs = sorted(list(self.trajs_by_timebin.keys()))
             if len(self.sample_time_idxs) == 0:
-                # fallback to 0
                 self.sample_time_idxs = [0]
         else:
             self.sample_time_idxs = list(range(self.T_hist, self.T_total))
+
+    # ============ 内部工具：缓存名/校验/清洗 ============
+    def _edge_cache_name(self, prefix):
+        # 签名：minfreq + N_graph，确保不同过滤结果不会撞缓存
+        return os.path.join(self.cache_dir, f"{prefix}_minfreq{self.min_flow_count}_N{self.N_graph}.npy")
+
+    def _assert_edge_index_ok(self, edge_index, name):
+        if edge_index is None or edge_index.numel() == 0:
+            return True
+        edge_index = edge_index.long()
+        src = edge_index[0]; dst = edge_index[1]
+        max_idx = int(torch.max(torch.stack([src.max(), dst.max()])))
+        min_idx = int(torch.min(torch.stack([src.min(), dst.min()])))
+        if min_idx < 0 or max_idx >= self.N_graph:
+            print(f"[Dataset][WARN] {name} out-of-range: min={min_idx}, max={max_idx}, N_graph={self.N_graph}")
+            return False
+        return True
+
+    def _sanitize_edges(self, edge_index, name):
+        if edge_index is None or edge_index.numel() == 0:
+            return edge_index
+        src, dst = edge_index[0].long(), edge_index[1].long()
+        mask = (src >= 0) & (dst >= 0) & (src < self.N_graph) & (dst < self.N_graph)
+        if mask.sum() != edge_index.size(1):
+            bad = (~mask).nonzero(as_tuple=False).view(-1)
+            examples = [(int(src[i]), int(dst[i])) for i in bad[:5]]
+            print(f"[Dataset][WARN] sanitize {name}: drop {bad.numel()} / {edge_index.size(1)} edges, examples={examples}")
+            edge_index = edge_index[:, mask]
+        return edge_index.contiguous().long()
+
+    # ============ 低频过滤：保留高频 + 末尾追加 UNK（不进图） ============
+    def _apply_min_freq_filter_and_add_unk(self):
+        """
+        基于 self.traffic_ts 的列总和筛除低频路段；重建 idx2seg/seg2idx；
+        末尾追加 UNK 索引；并在 traffic_ts 末尾追加 UNK 列（全 0）。
+        """
+        T, N, C = self.traffic_ts.shape
+        assert N == len(self.idx2seg), "traffic_ts 列数必须与 vocab 对齐。"
+
+        counts = self.traffic_ts.sum(axis=(0, 2))  # shape (N,)
+        keep_mask = counts >= self.min_flow_count
+        keep_idx = np.where(keep_mask)[0].tolist()
+
+        if len(keep_idx) == N:
+            return
+
+        removed = N - len(keep_idx)
+        print(f"[Dataset] min_flow_count={self.min_flow_count}: keep {len(keep_idx)}/{N} segments, removed {removed}, append UNK.")
+
+        idx2seg_new = [self.idx2seg[i] for i in keep_idx]
+        self.unk_idx = len(idx2seg_new)
+        idx2seg_new.append('UNK')
+
+        seg2idx_new = {rid: i for i, rid in enumerate(idx2seg_new[:-1])}
+
+        ts_kept = self.traffic_ts[:, keep_mask, :]
+        zeros_col = np.zeros((ts_kept.shape[0], 1, ts_kept.shape[2]), dtype=ts_kept.dtype)
+        self.traffic_ts = np.concatenate([ts_kept, zeros_col], axis=1)
+        self.T_total = self.traffic_ts.shape[0]
+
+        self.idx2seg = idx2seg_new
+        self.seg2idx = seg2idx_new
 
     def __len__(self):
         return len(self.sample_time_idxs)
@@ -790,23 +767,18 @@ class SegmentRoadDataset(Dataset):
         """
         返回 item:
         - full_edge_index: 2 x E_full LongTensor
-        - P_edge_full: E_full FloatTensor (for sample's time_bin) OR B x E_full handled in batch collate
+        - P_edge_full: E_full FloatTensor
         - edge_index: kmin edges 2 x E_k LongTensor
         - static: N x C_static FloatTensor
-        - S_hist: T_hist x N x C_state FloatTensor (if traffic_ts available)
-        - weekly_idx, daily_idx: LongTensor(T_hist) optional
-        - trajs: list of (nodes_list, bins_list) - nodes_list are segment idx integers
-        - time_idx: integer (global time index or bin)
+        - S_hist: T_hist x N x C_state FloatTensor
+        - weekly_idx, daily_idx: LongTensor(T_hist)
+        - trajs: list of (nodes_list, bins_list)
+        - time_idx: integer
         """
         t_sample = self.sample_time_idxs[idx]
-        # decide time bin
-        if self.traffic_ts is None or self.T_total == 0:
-            time_bin = int(t_sample % self.num_time_bins)
-        else:
-            time_bin = int(t_sample % self.num_time_bins)
+        time_bin = int(t_sample % self.num_time_bins)
 
         full_edge_index = self.full_edge_index  # 2 x E_full
-        # P_edge_full: choose row from P_time (if available)
         if hasattr(self, 'P_time') and self.P_time is not None and self.P_time.shape[1] == full_edge_index.size(1):
             P_edge_full = torch.FloatTensor(self.P_time[time_bin % self.P_time.shape[0]])
         else:
@@ -818,16 +790,14 @@ class SegmentRoadDataset(Dataset):
         if self.traffic_ts is not None and self.T_total > 0:
             start = int(t_sample - self.T_hist)
             if start < 0:
-                # pad with zeros at beginning
                 pad_len = -start
-                hist = np.zeros((self.T_hist, self.N, self.traffic_ts.shape[2]), dtype=np.float32)
+                hist = np.zeros((self.T_hist, self.N_total, self.traffic_ts.shape[2]), dtype=np.float32)
                 hist[pad_len:] = self.traffic_ts[0:t_sample]
                 S_hist = torch.FloatTensor(hist)
             else:
                 S_hist = torch.FloatTensor(self.traffic_ts[start:t_sample])
         else:
-            # fallback zeros
-            S_hist = torch.zeros((self.T_hist, self.N, 2), dtype=torch.float32)
+            S_hist = torch.zeros((self.T_hist, self.N_total, 2), dtype=torch.float32)
 
         weekly_idx = torch.LongTensor([ (t_sample // (24*3600)) % 7 for _ in range(self.T_hist) ])
         daily_idx = torch.LongTensor([ (t_sample // 3600) % 24 for _ in range(self.T_hist) ])
@@ -867,7 +837,7 @@ def batch_collate_fn(batch):
     B = len(batch)
     full_edge_index = batch[0]['full_edge_index']
     edge_index = batch[0]['edge_index']
-    P_edges = torch.stack([it['P_edge_full'] for it in batch], dim=0) if full_edge_index.numel() > 0 else torch.zeros((B,0), dtype=torch.float32)
+    P_edges = torch.stack([it['P_edge_full'] for it in batch], dim=0) if full_edge_index.numel() > 0 else torch.zeros((B, 0), dtype=torch.float32)
     static = torch.stack([it['static'] for it in batch], dim=0)
     S_hist = torch.stack([it['S_hist'] for it in batch], dim=0)
     weekly = torch.stack([it['weekly_idx'] for it in batch], dim=0)

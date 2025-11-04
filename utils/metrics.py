@@ -3,11 +3,21 @@ import torch
 import torch.nn.functional as F
 
 def nt_xent_loss(z1, z2, temperature=0.1):
+    """
+    支持输入:
+      - z1, z2: (B, D) 多 batch
+    """
+    # 单位化
     z1 = F.normalize(z1, dim=1)
     z2 = F.normalize(z2, dim=1)
-    sims = torch.mm(z1, z2.t()) / temperature
+
+    # 相似度矩阵
+    sims = torch.mm(z1, z2.t()) / temperature  # (N_total, N_total)
     labels = torch.arange(z1.size(0), device=z1.device)
-    return (F.cross_entropy(sims, labels) + F.cross_entropy(sims.t(), labels)) / 2.0
+
+    # 对称交叉熵
+    loss = (F.cross_entropy(sims, labels) + F.cross_entropy(sims.t(), labels)) / 2.0
+    return loss
 
 def mtp_loss(mtp_logits, true_nodes, mask):
     B,L,N = mtp_logits.shape
