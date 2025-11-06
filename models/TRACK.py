@@ -29,7 +29,7 @@ class TrafficTransformer(nn.Module):
         self.daily_emb = nn.Embedding(24, d)
         self.pos_emb = nn.Embedding(args.traffic_seq_len + 2, d)
         enc = nn.TransformerEncoderLayer(d, nhead=nh, dim_feedforward=d*2, batch_first=True)
-        self.trans = nn.TransformerEncoder(enc, num_layers=2)
+        self.trans = nn.TransformerEncoder(enc, num_layers=3)
         self.out = nn.Linear(d, d)
     def forward(self, S_hist, X_G=None, weekly_idx=None, daily_idx=None):
         B, T, N, _ = S_hist.shape
@@ -60,7 +60,7 @@ class TrajectoryTransformer(nn.Module):
         self.node_proj = nn.Linear(d, d)
         self.time_proj = nn.Linear(1, d)
         enc = nn.TransformerEncoderLayer(d, nhead=nh, dim_feedforward=d*2, batch_first=True)
-        self.trans = nn.TransformerEncoder(enc, num_layers=2)
+        self.trans = nn.TransformerEncoder(enc, num_layers=6)
         self.cls = nn.Parameter(torch.randn(1,1,d))
         self.mtp_seg = nn.Linear(d, args.n_nodes)
         self.mtp_time = nn.Linear(d, 1)
