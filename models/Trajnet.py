@@ -6,7 +6,6 @@ from collections import defaultdict
 from layers.Spatial_Atten import SpatialAttention
 from layers.Dilate_Causal_Con import DilatedCausalConv1d
 import torch.nn.functional as F
-    #TODO 把时间上遍历所有flow数据的逻辑集成到model中
 
 
 class TemporalConvBranch(nn.Module):

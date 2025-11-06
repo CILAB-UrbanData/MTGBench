@@ -1,5 +1,3 @@
-export CUDA_VISIBLE_DEVICES=1
-
 model_name=TrGNN
 
 python -u run.py \

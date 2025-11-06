@@ -1,6 +1,6 @@
 import os
 import torch
-from models import MDTP, Trajnet, TrGNN, TRACK_TRLLM_Cont, TRACK_DRNTRLTSP, MDTPmini
+from models import MDTP, MDTPSingle, Trajnet, TrGNN
 
 
 class Exp_Basic(object):
@@ -8,11 +8,9 @@ class Exp_Basic(object):
         self.args = args
         self.model_dict = {
             'MDTP': MDTP,
-            'MDTPmini': MDTPmini,
+            'MDTPmini': MDTPSingle,
             'Trajnet': Trajnet,
-            'TrGNN': TrGNN,
-            'TRACK_TRLLM_Cont': TRACK_TRLLM_Cont,
-            'TRACK_DRNTRLTSP': TRACK_DRNTRLTSP
+            'TrGNN': TrGNN
         }
         if args.model == 'Mamba':
             print('Please make sure you have successfully installed mamba_ssm')
@@ -21,6 +19,29 @@ class Exp_Basic(object):
 
         self.device = self._acquire_device()
         self.model = self._build_model().to(self.device)
+        self.model_optim = self._select_optimizer()
+        self.lr_istorch = args.lr_istorch
+        self.lr_scheduler = None
+        if self.lr_istorch:
+            self._build_lr_scheduler()
+
+    def _select_optimizer(self):
+        if self.args.learner.lower() == 'adam':
+            optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.learning_rate)                                        
+        elif self.args.learner.lower() == 'sgd':
+            optimizer = torch.optim.SGD(self.model.parameters(), lr=self.args.learning_rate)  
+        elif self.args.learner.lower() == 'adagrad':
+            optimizer = torch.optim.Adagrad(self.model.parameters(), lr=self.args.learning_rate)  
+        elif self.args.learner.lower() == 'rmsprop':
+            optimizer = torch.optim.RMSprop(self.model.parameters(), lr=self.args.learning_rate)  
+        elif self.args.learner.lower() == 'sparse_adam':
+            optimizer = torch.optim.SparseAdam(self.model.parameters(), lr=self.args.learning_rate)  
+        elif self.args.learner.lower() == 'adamw':
+            optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.args.learning_rate)  
+        else:
+            self._logger.warning('Received unrecognized optimizer, set default Adam optimizer')
+            optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.learning_rate)  
+        return optimizer
 
     def _build_model(self):
         raise NotImplementedError
@@ -39,6 +60,9 @@ class Exp_Basic(object):
             device = torch.device('cpu')
             print('Use CPU')
         return device
+    
+    def _build_lr_scheduler(self):
+        return None
 
     def _get_data(self):
         pass

@@ -1,5 +1,4 @@
-from data_provider.data_loader import MDTPRawloader, SF20_forTrajnet_Dataset, SF20_forTrGNN_Dataset, GaiyaForMDTP, DiDi_forTrGNN_Dataset
-from utils.TRACK_wrapper_trllm_cont import TSLibDatasetWrapper
+from data_provider.data_loader import MDTPRawloader, SF20_forTrajnet_Dataset, SF20_forTrGNN_Dataset, GaiyaForMDTP, DiDi_forTrGNN_Dataset, DiDi_forTrajnet_Dataset
 from torch.utils.data import DataLoader, Subset
 import random
 
@@ -8,8 +7,8 @@ data_dict = {
     'GaiyaForMDTP': GaiyaForMDTP,
     'Trajnet': SF20_forTrajnet_Dataset,
     'TrGNN': SF20_forTrGNN_Dataset,
-    'TRACK_trllm_cont': TSLibDatasetWrapper,
-    'DiDiTrGNN': DiDi_forTrGNN_Dataset
+    'DiDiTrGNN': DiDi_forTrGNN_Dataset,
+    'DiDiTrajnet': DiDi_forTrajnet_Dataset
 }
 
 def data_provider(args, flag='train'):
@@ -20,7 +19,7 @@ def data_provider(args, flag='train'):
     batch_size = args.batch_size
 
     if args.task_name == 'TrafficPrediction':
-        if args.data == 'Trajnet':
+        if args.data == 'Trajnet' or args.data == 'DiDiTrajnet':
             drop_last = False
             shuffle_flag = False
             data_set = Data(

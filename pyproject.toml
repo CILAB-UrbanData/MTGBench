@@ -1,0 +1,27 @@
+[project]
+name = "traffic-benchmark"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "geopandas>=1.1.1",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.6",
+    "point>=0.0.1",
+    "pyproj>=3.7.1",
+    "rtree>=1.4.1",
+    "scikit-learn>=1.7.2",
+    "scipy>=1.15.3",
+    "shapely>=2.1.2",
+    "torch>=2.8.0",
+    "torch-scatter>=2.1.2",
+    "tqdm>=4.67.1",
+    "wandb>=0.22.1",
+]
+
+[[tool.uv.index]]
+url = "https://download.pytorch.org/whl/cu126"
+
+
+
