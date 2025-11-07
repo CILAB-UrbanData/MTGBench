@@ -41,9 +41,9 @@ def run_finetune(model, dataloader, optimizer, args, load_pretrained=True):
     model.to(device)
     model.train()
     loss_list = []
-    for epoch in range(args.pretrain_epochs):
+    for epoch in range(args.finetune_epochs):
         running = 0.0
-        pbar = tqdm(dataloader, desc=f"Finetune {epoch+1}/{args.pretrain_epochs}")
+        pbar = tqdm(dataloader, desc=f"Finetune {epoch+1}/{args.finetune_epochs}")
         for batch in pbar:
             full_edge_index  = batch['full_edge_index'].to(device)   # 2 x E (LongTensor)
             P_edge = batch['P_edge_full'].to(device)           # E (FloatTensor)
@@ -103,10 +103,10 @@ if __name__ == "__main__":
     argparser.add_argument('--n_heads', type=int, default=8, help='Number of attention heads')
     argparser.add_argument('--traffic_seq_len', type=int, default=7)
     argparser.add_argument('--n_nodes', type=int, default=26659)
-    argparser.add_argument('--pretrain_epochs', type=int, default=2, help='Number of pretraining epochs')
+    argparser.add_argument('--finetune_epochs', type=int, default=50, help='Number of finetuning epochs')
     argparser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')
     argparser.add_argument('--gpu', type=int, default=0, help='gpu')
-    argparser.add_argument('--batch_size', type=int, default=2, help='Batch size for pretraining')
+    argparser.add_argument('--batch_size', type=int, default=4, help='Batch size for pretraining')
     argparser.add_argument('--traj_max_len', type=int, default=30, help='Max length of trajectory for pretraining')
     argparser.add_argument('--aug_dropout', type=float, default=0.2, help='Node dropout ratio for trajectory augmentation')
     argparser.add_argument('--contrast_temp', type=float, default=0.1, help='Temperature for contrastive loss')

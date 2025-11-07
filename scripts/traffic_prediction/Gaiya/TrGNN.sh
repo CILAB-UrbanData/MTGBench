@@ -8,12 +8,12 @@ python -u run.py \
   --data DiDiTrGNN \
   --normalization True \
   --learning_rate 0.004 \
-  --batch_size 32 \
+  --batch_size 64 \
   --lradj 'type5' \
   --itr 1 \
   --train_epochs 100 \
   --patience 20 \
-  --NumofRoads 3345 \
+  --NumofRoads 3555 \
   --start_date 20161101\
-  --end_date 20161107 \
+  --end_date 20161130 \
   --pre_steps 1

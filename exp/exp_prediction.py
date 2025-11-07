@@ -1,4 +1,5 @@
-import torch, os, time, wandb, tqdm
+import torch, os, time, wandb
+from tqdm import tqdm
 import numpy as np
 import torch.nn as nn
 from utils.tools import EarlyStopping, adjust_learning_rate

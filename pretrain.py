@@ -16,7 +16,7 @@ import os
 from tqdm import tqdm
 from utils.metrics import nt_xent_loss, mtp_loss, mtp_time_loss, mask_state_loss, match_nt_xent
 from models.TRACK import Model
-from data_provider.track_data import SegmentRoadDataset, batch_collate_fn
+from data_provider.data_loader import TRACKDataset
 import argparse
 from torch.utils.data import DataLoader
 from torch.optim import Adam
@@ -197,10 +197,10 @@ if __name__ == "__main__":
     argparser.add_argument('--n_heads', type=int, default=8, help='Number of attention heads')
     argparser.add_argument('--traffic_seq_len', type=int, default=7)
     argparser.add_argument('--n_nodes', type=int, default=26659)
-    argparser.add_argument('--pretrain_epochs', type=int, default=2, help='Number of pretraining epochs')
+    argparser.add_argument('--pretrain_epochs', type=int, default=100, help='Number of pretraining epochs')
     argparser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')
     argparser.add_argument('--gpu', type=int, default=0, help='gpu')
-    argparser.add_argument('--batch_size', type=int, default=2, help='Batch size for pretraining')
+    argparser.add_argument('--batch_size', type=int, default=4, help='Batch size for pretraining')
     argparser.add_argument('--traj_max_len', type=int, default=30, help='Max length of trajectory for pretraining')
     argparser.add_argument('--aug_dropout', type=float, default=0.2, help='Node dropout ratio for trajectory augmentation')
     argparser.add_argument('--contrast_temp', type=float, default=0.1, help='Temperature for contrastive loss')
@@ -220,8 +220,8 @@ if __name__ == "__main__":
         else:
             args.device = torch.device("cpu")
         print('Using cpu or mps')
-    dataset = SegmentRoadDataset("data/sf_data/raw")
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=batch_collate_fn, drop_last=True)
+    dataset = TRACKDataset("data/sf_data/raw")
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=dataset.collate_fn, drop_last=True)
     N = int(dataset.static.shape[0])  
     has_unk = (len(getattr(dataset, "idx2seg", [])) > 0 and dataset.idx2seg[-1] == "UNK")
     N_graph = N - 1 if has_unk else N   
