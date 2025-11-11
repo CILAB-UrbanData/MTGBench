@@ -59,10 +59,3 @@ def data_provider(args, flag='train'):
             drop_last=drop_last,
             collate_fn=data_set.collate_fn if hasattr(data_set, 'collate_fn') else None)
         return data_set, data_loader
-
-    elif args.task_name == 'TRACK_trllm_cont':
-        if args.data == 'TRACK_Gaiya':
-            data_set = Data(args)
-            train_loader, eval_loader, test_loader = data_set.get_data()
-            data_feature = data_set.get_data_feature()
-        return data_set, train_loader, eval_loader, test_loader, data_feature

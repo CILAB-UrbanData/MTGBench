@@ -13,5 +13,6 @@ python -u run.py \
   --batch_size 2 \
   --lradj 'type5' \
   --itr 1 \
-  --train_epochs 2 \
-  --patience 20
+  --train_epochs 100 \
+  --patience 20 \
+  --pre_steps 1 \

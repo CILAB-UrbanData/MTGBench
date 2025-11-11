@@ -11,6 +11,41 @@ class ExpPrediction(Exp_Basic):
     def __init__(self, args):
         super(ExpPrediction, self).__init__(args)
     
+    def _build_torch_scheduler(self):
+        if self.args.lr_scheduler == 'StepLR':
+            self.lr_scheduler = torch.optim.lr_scheduler.StepLR(
+                self.model_optim,
+                step_size=self.args.lr_step,
+                gamma=self.args.lr_decay)
+        elif self.args.lr_scheduler == 'MultiStepLR':
+            self.lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+                self.model_optim,
+                milestones=self.args.lr_milestones,
+                gamma=self.args.lr_decay)
+        elif self.args.lr_scheduler == "cosine":
+            # 自动 warmup：线性从 0 -> base_lr，再余弦到 min_lr
+            warmup_epochs = getattr(self.args, "warmup_epochs", 6)
+            min_lr_ratio = getattr(self.args, "min_lr_ratio", 0.03)  # min_lr = base_lr * ratio
+            # 以 epoch 为单位 step（更常见）
+            warmup = torch.optim.lr_scheduler.LinearLR(
+                self.model_optim,
+                start_factor=0.001,
+                end_factor=1.0,
+                total_iters=max(1, warmup_epochs)
+            )
+            cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.model_optim,
+                T_max=max(1, self.args.train_epochs - warmup_epochs),
+                eta_min=self.args.learning_rate * min_lr_ratio
+            )
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                self.model_optim, schedulers=[warmup, cosine], milestones=[warmup_epochs]
+            )
+            self.lr_scheduler = scheduler
+        else:
+            self._logger.warning('Received unrecognized lr scheduler, no lr scheduler will be used')
+            self.lr_scheduler = None
+    
     def _build_model(self):
         model = self.model_dict[self.args.model].Model(self.args)
 
@@ -138,7 +173,10 @@ class ExpPrediction(Exp_Basic):
                 "test_loss": test_loss
             })
             
-            adjust_learning_rate(self.model_optim, epoch + 1, self.args)
+            if self.lr_istorch:
+                adjust_learning_rate(self.model_optim, epoch + 1, self.args, self.lr_scheduler) 
+            else:
+                adjust_learning_rate(self.model_optim, epoch + 1, self.args)
 
         best_model_path = path + '/' + 'checkpoint.pth'
         self.model.load_state_dict(torch.load(best_model_path))
@@ -174,7 +212,10 @@ class ExpPrediction(Exp_Basic):
                     true = targets.cpu().numpy().reshape(-1, 4)     
                 elif self.args.model == 'MDTPmini':    
                     pred = pred.cpu().numpy().reshape(-1, 2)
-                    true = targets.cpu().numpy().reshape(-1, 2)     
+                    true = targets.cpu().numpy().reshape(-1, 2)   
+                elif self.args.model == 'TrGNN':
+                    pred = test_data.scaler.inverse_transform(pred.cpu().numpy()).reshape(-1, self.args.pre_steps)
+                    true = test_data.scaler.inverse_transform(targets.cpu().numpy()).reshape(-1, self.args.pre_steps)
                 else:                     
                     pred = pred.cpu().numpy().reshape(-1, self.args.pre_steps)
                     true = targets.cpu().numpy().reshape(-1, self.args.pre_steps)
@@ -190,7 +231,7 @@ class ExpPrediction(Exp_Basic):
 
         mae  = mean_absolute_error(y_trues, y_preds)
         rmse = mean_squared_error(y_trues, y_preds)
-        mape = np.mean(np.abs((y_trues - y_preds) / (y_trues + 1e-3))) * 100
+        mape = np.mean(np.abs((y_trues - y_preds) / (y_trues + 1))) * 100
         metrics = {'MAE': mae, 'RMSE': rmse, 'MAPE': mape}
         print(f"Test MAE {mae:.4f}, RMSE {rmse:.4f}, MAPE {mape:.2f}%")
 

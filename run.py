@@ -45,7 +45,6 @@ if __name__ == '__main__':
     parser.add_argument('--fusion', type=str, default='sum', help='fusion method for traffic prediction, options:[sum, concat]')
     parser.add_argument('--N_regions', type=int, help='number of nodes in the graph')
     parser.add_argument('--num_layers', type=int, default=2, help='number of layers in the model')
-    parser.add_argument('--grad_clip', type=float, default=5.0, help='gradient clipping value')
     parser.add_argument('--S', type=int, default=24, help='sequence length for traffic prediction')
     parser.add_argument('--dropout', type=float, default=0.5, help='dropout')
 
@@ -63,22 +62,14 @@ if __name__ == '__main__':
     parser.add_argument('--demand_hop', type=int, default=75, help='GCN output feature size')
     parser.add_argument('--status_hop', type=int, default=3, help='GCN input feature size')
     parser.add_argument('--start_date', type=str, default='20080517')
-    parser.add_argument('--end_date', type=str, default='20080518')
+    parser.add_argument('--end_date', type=str, default='20080610')
     parser.add_argument('--NumofRoads', type=int, default=19621)
-
-    '''TRACK_trllm_cont's args'''
-    parser.add_argument('--vocab_path', type=str, default=None, help='vocab path')
-    parser.add_argument('--add_cls', action='store_true', help='whether to add cls token', default=False)
-    parser.add_argument('--masking_ratio', type=float, default=0.15, help='masking ratio')
-    parser.add_argument('--masking_mode', type=str, default='together', help='masking mode, options: [together, separate]')
-    parser.add_argument('--distribution', type=str, default='random', help='masking distribution    , options: [random, poisson]')
-    parser.add_argument('--avg_mask_len', type=int, default=2, help='average masking length for poisson distribution')
-    parser.add_argument('--data_augment1', type=str, default='trim', help='data augmentation method for first view, options: [trim, shift, none]')
-    parser.add_argument('--data_augment2', type=str, default='shift', help='data augmentation method for second view, options: [trim, shift, none]')
+    parser.add_argument('--warmup_epochs', type=int, default=5, help='number of warmup epochs')
+    parser.add_argument('--min_lr_ratio', type=float, default=5e-5, help='minimum learning rate ratio')
 
     # optimization
     parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
-    parser.add_argument('--itr', type=int, default=1, help='experiments times')
+    parser.add_argument('--itr', type=int, default=10, help='experiments times')
     parser.add_argument('--train_epochs', type=int, default=1, help='train epochs')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size of train input data')
     parser.add_argument('--patience', type=int, default=20, help='early stopping patience')
@@ -86,9 +77,14 @@ if __name__ == '__main__':
     parser.add_argument('--des', type=str, default='test', help='exp description')
     parser.add_argument('--loss', type=str, default='L1', help='loss function')
     parser.add_argument('--lradj', type=str, default='type1', help='adjust learning rate')
+    parser.add_argument('--lr_scheduler', type=str, default=None, help='type of learning rate scheduler')
     parser.add_argument('--lr_istorch', action='store_true', help='whether to use the learning rate scheduler provided by Pytorch', default=False)
     parser.add_argument('--learner', type=str, default='adam', help='optimizer type')
     parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
+    parser.add_argument('--adamw_beta1', type=float, default=0.9, help='beta1 for AdamW optimizer')
+    parser.add_argument('--adamw_beta2', type=float, default=0.999, help='beta2 for AdamW optimizer')
+    parser.add_argument('--grad_clip', type=float, default=5.0, help='gradient clipping value')
+    parser.add_argument('--adamw_weight_decay', type=float, default=0.01, help='weight decay for AdamW optimizer')
 
     # GPU
     parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')

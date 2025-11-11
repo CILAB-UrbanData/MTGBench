@@ -2,7 +2,6 @@ import os
 import torch
 from models import MDTP, MDTPSingle, Trajnet, TrGNN
 
-
 class Exp_Basic(object):
     def __init__(self, args):
         self.args = args
@@ -23,7 +22,7 @@ class Exp_Basic(object):
         self.lr_istorch = args.lr_istorch
         self.lr_scheduler = None
         if self.lr_istorch:
-            self._build_lr_scheduler()
+            self._build_torch_scheduler()
 
     def _select_optimizer(self):
         if self.args.learner.lower() == 'adam':
@@ -37,7 +36,10 @@ class Exp_Basic(object):
         elif self.args.learner.lower() == 'sparse_adam':
             optimizer = torch.optim.SparseAdam(self.model.parameters(), lr=self.args.learning_rate)  
         elif self.args.learner.lower() == 'adamw':
-            optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.args.learning_rate)  
+            beta1 = getattr(self.args, "adamw_beta1", 0.9)
+            beta2 = getattr(self.args, "adamw_beta2", 0.999)
+            weight_decay = getattr(self.args, "adamw_weight_decay", 0.01)
+            optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.args.learning_rate, betas=(beta1, beta2), weight_decay=weight_decay)
         else:
             self._logger.warning('Received unrecognized optimizer, set default Adam optimizer')
             optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.learning_rate)  
@@ -61,7 +63,7 @@ class Exp_Basic(object):
             print('Use CPU')
         return device
     
-    def _build_lr_scheduler(self):
+    def _build_torch_scheduler(self):
         return None
 
     def _get_data(self):

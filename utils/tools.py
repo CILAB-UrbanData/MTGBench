@@ -12,6 +12,10 @@ def ensure_dir(dir_path):
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
 
+def get_current_lr(optimizer):
+    # 多 param_group 时可记录列表；这里取第一个最常用
+    return optimizer.param_groups[0]["lr"]
+
 #将adjust_learning_rate添加一个大分支，torch托管的lr走一边,手动调整的lr走老一边(判断方式为exp的self标志位)
 def adjust_learning_rate(optimizer, epoch, args, lr_scheduler=None):
     # lr = args.learning_rate * (0.2 ** (epoch // 2))
@@ -40,6 +44,8 @@ def adjust_learning_rate(optimizer, epoch, args, lr_scheduler=None):
     else:
         if lr_scheduler is not None:
             lr_scheduler.step()
+            print('Updating learning rate to {}'.format(get_current_lr(optimizer)))
+            wandb.log({"learning_rate": get_current_lr(optimizer)}, step=epoch)
 
 
 class Scheduler:
@@ -305,7 +311,7 @@ def date_range(date1, date2):
     datetime1 = dt.strptime(date1, '%Y%m%d')
     datetime2 = dt.strptime(date2, '%Y%m%d')
     days = (datetime2 - datetime1).days + 1
-    date_list = [(datetime1 + timedelta(day)).strftime('%Y_%m%d') for day in range(days)]
+    date_list = [(datetime1 + timedelta(day)).strftime('%Y%m%d') for day in range(days)]  #Gaiya的处理要在%y_%m%d格式下进行
     return date_list
 
 def time_difference(time1, time2):

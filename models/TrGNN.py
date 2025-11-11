@@ -116,8 +116,12 @@ class Model(nn.Module):
         self.output_layer = ChannelFullyConnected(in_features=4+24+1, channels=args.NumofRoads) # channels=n_road
 
         # other data stored here for convenience
-        with open('/mnt/nas/home/cilab/wyx_ws/Traffic-Benchmark/data/GaiyaData/TrGNN/processed/cache/preprocess_DiDiTrGNN.pkl', 'rb') as f:
-            normalized_flows, transitions_ToD, self.W, self.W_norm = pkl.load(f)
+        if args.data == 'DiDiTrGNN':
+            with open('/mnt/nas/home/cilab/wyx_ws/Traffic-Benchmark/data/GaiyaData/TrGNN/processed/cache/preprocess_DiDiTrGNN.pkl', 'rb') as f:
+                normalized_flows, transitions_ToD, self.W, self.W_norm = pkl.load(f)
+        elif args.data == 'TrGNN':
+            with open('/mnt/nas/home/cilab/wyx_ws/Traffic-Benchmark/data/sf_data/TrGNN/cache/preprocess_TrGNNsf_20.pkl', 'rb') as f:
+                normalized_flows, transitions_ToD, self.W, self.W_norm = pkl.load(f)
         self.W = self.W.to(args.device)
         self.W_norm = self.W_norm.to(args.device)  
         self._init_weights()  
