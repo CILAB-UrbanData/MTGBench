@@ -3,6 +3,7 @@ import os
 import torch
 import torch.backends
 from exp.exp_prediction import ExpPrediction
+from exp.exp_trackpre import ExpTRACKPre
 from utils.print_args import print_args
 import random, wandb
 import numpy as np
@@ -36,6 +37,7 @@ if __name__ == '__main__':
     # Prediction task
     parser.add_argument('--pre_steps', type=int, default=6, help='the predictions time steps')
     parser.add_argument('--seq_len', type=int, default=4, help='input sequence length')
+    parser.add_argument('--NumofRoads', type=int, default=19621, help='number of nodes in the graph')
 
     # model define
     '''MDTP's args'''
@@ -63,9 +65,20 @@ if __name__ == '__main__':
     parser.add_argument('--status_hop', type=int, default=3, help='GCN input feature size')
     parser.add_argument('--start_date', type=str, default='20080517')
     parser.add_argument('--end_date', type=str, default='20080610')
-    parser.add_argument('--NumofRoads', type=int, default=19621)
     parser.add_argument('--warmup_epochs', type=int, default=5, help='number of warmup epochs')
     parser.add_argument('--min_lr_ratio', type=float, default=5e-5, help='minimum learning rate ratio')
+    
+    '''TRACK pretrain args'''
+    parser.add_argument('--static_feat_dim', type=int, default=3)
+    parser.add_argument('--d_model', type=int, default=32, help='Dimension of the model')
+    parser.add_argument('--n_heads', type=int, default=8, help='Number of attention heads')
+    parser.add_argument('--traffic_seq_len', type=int, default=7)
+    parser.add_argument('--traj_max_len', type=int, default=30, help='Max length of trajectory for pretraining')
+    parser.add_argument('--contrast_temp', type=float, default=0.1, help='Temperature for contrastive loss')
+    parser.add_argument('--mtp_mask_ratio', type=float, default=0.15, help='Mask ratio for MTP task')
+    parser.add_argument('--lambda_traj', type=float, default=1.0, help='Weight for trajectory losses')
+    parser.add_argument('--lambda_traf', type=float, default=1.0, help='Weight for traffic view losses')
+    parser.add_argument('--lambda_match', type=float, default=1.0, help='Weight for matching loss')
 
     # optimization
     parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
@@ -122,6 +135,8 @@ if __name__ == '__main__':
 
     if args.task_name == 'TrafficPrediction':
         Exp = ExpPrediction
+    elif args.task_name == 'TRACK_pretrain':
+        Exp = ExpTRACKPre
 
     if args.is_training:
         for ii in range(args.itr):

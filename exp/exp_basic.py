@@ -1,6 +1,6 @@
 import os
 import torch
-from models import MDTP, MDTPSingle, Trajnet, TrGNN
+from models import MDTP, MDTPSingle, Trajnet, TrGNN, TRACK
 
 class Exp_Basic(object):
     def __init__(self, args):
@@ -9,7 +9,8 @@ class Exp_Basic(object):
             'MDTP': MDTP,
             'MDTPmini': MDTPSingle,
             'Trajnet': Trajnet,
-            'TrGNN': TrGNN
+            'TrGNN': TrGNN,
+            'TRACK': TRACK,
         }
         if args.model == 'Mamba':
             print('Please make sure you have successfully installed mamba_ssm')
@@ -25,29 +26,10 @@ class Exp_Basic(object):
             self._build_torch_scheduler()
 
     def _select_optimizer(self):
-        if self.args.learner.lower() == 'adam':
-            optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.learning_rate)                                        
-        elif self.args.learner.lower() == 'sgd':
-            optimizer = torch.optim.SGD(self.model.parameters(), lr=self.args.learning_rate)  
-        elif self.args.learner.lower() == 'adagrad':
-            optimizer = torch.optim.Adagrad(self.model.parameters(), lr=self.args.learning_rate)  
-        elif self.args.learner.lower() == 'rmsprop':
-            optimizer = torch.optim.RMSprop(self.model.parameters(), lr=self.args.learning_rate)  
-        elif self.args.learner.lower() == 'sparse_adam':
-            optimizer = torch.optim.SparseAdam(self.model.parameters(), lr=self.args.learning_rate)  
-        elif self.args.learner.lower() == 'adamw':
-            beta1 = getattr(self.args, "adamw_beta1", 0.9)
-            beta2 = getattr(self.args, "adamw_beta2", 0.999)
-            weight_decay = getattr(self.args, "adamw_weight_decay", 0.01)
-            optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.args.learning_rate, betas=(beta1, beta2), weight_decay=weight_decay)
-        else:
-            self._logger.warning('Received unrecognized optimizer, set default Adam optimizer')
-            optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.learning_rate)  
-        return optimizer
+        raise NotImplementedError
 
     def _build_model(self):
         raise NotImplementedError
-        return None
 
     def _acquire_device(self):
         if self.args.use_gpu and self.args.gpu_type == 'cuda':

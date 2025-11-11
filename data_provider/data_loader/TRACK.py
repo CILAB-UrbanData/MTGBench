@@ -421,7 +421,8 @@ class TRACKDataset(Dataset):
     """
     Dataset where each node is a road segment (road_id).
     """
-    def __init__(self, data_root,
+    def __init__(self, data_root, flag,
+                 args=None,
                  static_file=None,
                  traffic_ts_file=None,
                  road_shp_file=None,
@@ -452,6 +453,7 @@ class TRACKDataset(Dataset):
             feature_cols = ['length', 'lanes', 'oneway']
 
         self.data_root = data_root
+        self.args = args
         self.road_shp_file = road_shp_file
         self.traj_file = traj_file
         self.static_file = static_file
@@ -484,7 +486,7 @@ class TRACKDataset(Dataset):
             self.T_total, _, _ = self.traffic_ts.shape
         else:
             print(f"[Dataset] traffic_ts_file {traffic_ts_file} not found, will convert from traj_file")
-            self.traffic_ts = convert_traj2flow(self.traj_file, len(self.idx2seg), idx2seg=self.idx2seg)
+            self.traffic_ts = convert_traj2flow(self.traj_file, len(self.idx2seg), idx2seg=self.idx2seg) #TODO: flow normalize
             self.T_total, _, _ = self.traffic_ts.shape
 
         # 2.5) 低频过滤 -> UNK（仅当 min_flow_count > 0）
@@ -496,6 +498,21 @@ class TRACKDataset(Dataset):
         self.N_total = len(self.idx2seg)                  # 含 UNK
         self.N_graph = self.N_total - 1 if (self.unk_idx is not None) else self.N_total  # 图中有效节点数（不含 UNK）
         self.N = self.N_total  # 兼容旧代码
+        
+        assert flag in ['train', 'val', 'test']
+        N_len = self.T_total - self.T_hist
+        train_n = int(N_len * 0.6)
+        val_n   = int(N_len * 0.2)
+        test_n  = N_len - train_n - val_n
+        segments = [('train', train_n),
+                    ('val',   val_n),
+                    ('test',  test_n)]
+        idx_map = {}
+        start = self.T_hist
+        for name, length in segments:
+            idx_map[name] = list(range(start, start + length))
+            start += length
+        self.idx_map = idx_map[flag]
 
         # 3) static（对齐过滤后的 idx2seg；若有 UNK 末尾补 0）
         if self.static_file is not None and os.path.exists(self.static_file):
@@ -660,14 +677,6 @@ class TRACKDataset(Dataset):
                 np.save(kmin_cache, self.edge_index_kmin.cpu().numpy())
         assert self._assert_edge_index_ok(self.edge_index_kmin, "edge_index_kmin(final)"), "edge_index_kmin still invalid"
 
-        # 9) sample time idxs
-        if self.traffic_ts is None or self.T_total == 0:
-            self.sample_time_idxs = sorted(list(self.trajs_by_timebin.keys()))
-            if len(self.sample_time_idxs) == 0:
-                self.sample_time_idxs = [0]
-        else:
-            self.sample_time_idxs = list(range(self.T_hist, self.T_total))
-
     # ============ 内部工具：缓存名/校验/清洗 ============
     def _edge_cache_name(self, prefix):
         # 签名：minfreq + N_graph，确保不同过滤结果不会撞缓存
@@ -731,7 +740,7 @@ class TRACKDataset(Dataset):
         self.seg2idx = seg2idx_new
 
     def __len__(self):
-        return len(self.sample_time_idxs)
+        return len(self.idx_map)
 
     def __getitem__(self, idx):
         """
@@ -745,7 +754,7 @@ class TRACKDataset(Dataset):
         - trajs: list of (nodes_list, bins_list)
         - time_idx: integer
         """
-        t_sample = self.sample_time_idxs[idx]
+        t_sample = self.idx_map[idx]
         time_bin = int(t_sample % self.num_time_bins)
 
         full_edge_index = self.full_edge_index  # 2 x E_full
@@ -769,8 +778,8 @@ class TRACKDataset(Dataset):
         else:
             S_hist = torch.zeros((self.T_hist, self.N_total, 2), dtype=torch.float32)
 
-        weekly_idx = torch.LongTensor([ (t_sample // (24*3600)) % 7 for _ in range(self.T_hist) ])
-        daily_idx = torch.LongTensor([ (t_sample // 3600) % 24 for _ in range(self.T_hist) ])
+        weekly_idx = torch.LongTensor([ (t_sample // 144) % 7 for _ in range(self.T_hist) ])
+        daily_idx = torch.LongTensor([ (t_sample // 6) % 24 for _ in range(self.T_hist) ])
 
         trajs_for_bin = self.trajs_by_timebin.get(time_bin, [])
         if len(trajs_for_bin) == 0:
@@ -825,3 +834,9 @@ class TRACKDataset(Dataset):
             'trajs': trajs,
             'time_idx': time_idxs
         }   
+
+if __name__ == "__main__":
+    # 示例用法
+    data_root = 'data/sf_data/raw'
+    dataset = TRACKDataset(data_root, flag='train', args={})
+    print(f"NumofRoads: {int(dataset.static.shape[0])}")

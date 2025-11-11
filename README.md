@@ -39,8 +39,4 @@ exp_prediction(没有使用lstm的较为通用的交通预测任务) ------- Tra
 # 数据链接 #
 [百度网盘数据链接](https://pan.baidu.com/s/1s3VafVC22W18ktWrjqEaRg?pwd=ss52)
 
-TODO
-1. models里面的config.get想办法替换掉
-2. exptrain函数完善掉
-3. data_loader巨大麻烦
 

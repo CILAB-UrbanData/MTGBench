@@ -1,5 +1,8 @@
 # models/track_model.py
-import torch, math, torch.nn as nn, torch.nn.functional as F
+import torch, math
+import torch.nn as nn
+import torch.nn.functional as F
+import random
 from layers.TRACK_attention import StaticSparseGAT, CoAttLayer, CrossSparseGAT
 
 def pairwise_geo_distance(static_feats):
@@ -9,6 +12,17 @@ def pairwise_geo_distance(static_feats):
     diff = coords.unsqueeze(1) - coords.unsqueeze(0)
     dist2 = (diff**2).sum(dim=-1)
     return torch.sqrt(dist2 + 1e-9)
+
+# padding helper
+def pad_trajs(seqs, L, pad_val_getter):
+    out = []
+    for seq in seqs:
+        if len(seq) >= L:
+            out.append(seq[:L])
+        else:
+            pad_val = pad_val_getter(seq)  # 通常用 seq[-1]
+            out.append(seq + [pad_val] * (L - len(seq)))
+    return out
 
 # ---------------- Segment Encoder ----------------
 class SegmentEncoder(nn.Module):
@@ -24,7 +38,7 @@ class TrafficTransformer(nn.Module):
     def __init__(self, args):
         super().__init__()
         d = args.d_model; nh = args.n_heads
-        self.input_proj = nn.Linear(1, d)  #2 为输入的flow&speed看情况
+        self.input_proj = nn.LazyLinear(args.d_model)    #2 为输入的flow&speed看情况
         self.weekly_emb = nn.Embedding(7, d)
         self.daily_emb = nn.Embedding(24, d)
         self.pos_emb = nn.Embedding(args.traffic_seq_len + 2, d)
@@ -62,7 +76,7 @@ class TrajectoryTransformer(nn.Module):
         enc = nn.TransformerEncoderLayer(d, nhead=nh, dim_feedforward=d*2, batch_first=True)
         self.trans = nn.TransformerEncoder(enc, num_layers=6)
         self.cls = nn.Parameter(torch.randn(1,1,d))
-        self.mtp_seg = nn.Linear(d, args.n_nodes)
+        self.mtp_seg = nn.Linear(d, args.NumofRoads)
         self.mtp_time = nn.Linear(d, 1)
     def forward(self, seg_embs, times):
         B,L,_ = seg_embs.shape
@@ -87,7 +101,7 @@ class Model(nn.Module):
         self.traf_trans = TrafficTransformer(args)
         self.traj_trans = TrajectoryTransformer(args)
         self.coatt_blocks = nn.ModuleList([CoAttLayer(args) for _ in range(getattr(args, 'n_coatt_layers', 2))])
-        self.state_head = nn.Linear(args.d_model, getattr(args, 'state_out_dim', 1))
+        self.state_head = nn.Linear(args.d_model, getattr(args, 'pre_steps', 1))
 
     # --------- 工具：把 edge_index 复制 B 份并做偏移（+b*N） ----------
     def _tile_edge_index(self, edge_index: torch.Tensor, B: int, N: int) -> torch.Tensor:
@@ -123,7 +137,7 @@ class Model(nn.Module):
         return -0.5 * (d2 / (sigma * sigma))                               # (B*E,)
 
     # ---------------- 论文公式 (7)/(8)：按时间片 t 使用 P_edge_t（trajectory internal transition-aware GAT） ------------
-    def compute_H_traj(self, static, edge_index, P_edge_t=None, deter_edge=None):
+    def _compute_H_traj(self, static, edge_index, P_edge_t=None, deter_edge=None):
         B, N, C = static.shape
         H0 = self.seg(static.reshape(B * N, C))
         eiB = self._tile_edge_index(edge_index, B, N)                      # 2 x (B*E)
@@ -136,7 +150,7 @@ class Model(nn.Module):
         return H.view(B, N, -1)
 
     # ---------------- traffic view（静态 + 历史 traffic + X_G 注入） ----------------
-    def compute_H_traf(self, static, S_hist, edge_index, P_edge=None, weekly_idx=None, daily_idx=None):
+    def _compute_H_traf(self, static, S_hist, edge_index, P_edge=None, weekly_idx=None, daily_idx=None):
         B, N, C = static.shape
         H0  = self.seg(static.reshape(B * N, C))
         eiB = self._tile_edge_index(edge_index, B, N)
@@ -150,7 +164,7 @@ class Model(nn.Module):
         return H0.view(B, N, -1) +  H_time
 
     # ---------------- co-att: 堆叠多层 CoAttLayer（对应论文 (11)/(12)） ----------------
-    def co_attention_exchange(self, H_traj, H_traf, edge_index_traf2traj, edge_index_traj2traf,
+    def _co_attention_exchange(self, H_traj, H_traf, edge_index_traf2traj, edge_index_traj2traf,
                               P_edge_traf2traj=None, P_edge_traj2traf=None, deter_traf2traj=None, deter_traj2traf=None):
         """
         H_traj: N x d
@@ -173,7 +187,7 @@ class Model(nn.Module):
         return Ht.view(B, N, d), Hf.view(B, N, d)
 
     # ---------------- trajectory encoding（只用 H_traj） ----------------
-    def forward_traj(self, H_traj_nodes, traj_nodes_padded, traj_times_padded):
+    def _forward_traj(self, H_traj_nodes, traj_nodes_padded, traj_times_padded):
         """
         H_traj_nodes: N x d
         traj_nodes_padded: B x L (indices)
@@ -189,3 +203,125 @@ class Model(nn.Module):
 
     def predict_next_state(self, H):
         return self.state_head(H)
+    
+    # 对于pretrain阶段的forward封装
+    def forward_pretrain(self, batch):
+        """
+        完整的 pretrain forward 流程
+        """
+        full_edge_index  = batch['full_edge_index'].to(self.args.device)   # 2 x E (LongTensor)
+        P_edge = batch['P_edge_full'].to(self.args.device)           # E (FloatTensor)
+        static = batch['static'].to(self.args.device)           # N x C
+        S_hist = batch['S_hist'].to(self.args.device)           # T x N x C_state
+        edge_index_kmin = batch['edge_index'].to(self.args.device)  # 2 x E_kmin (LongTensor)
+        weekly_idx = batch.get('weekly_idx', None)
+        daily_idx = batch.get('daily_idx', None)
+        if weekly_idx is not None:
+            weekly_idx = weekly_idx.to(self.args.device)
+        if daily_idx is not None:
+            daily_idx = daily_idx.to(self.args.device)
+        traj_pool = batch['trajs']  # list of (nodes, times)   
+
+        # ========== 1) compute separate view representations ==========
+        # H_traj: strict static-only per paper eq(1)
+        H_traj = self._compute_H_traj(static, full_edge_index)  # N x d
+        # H_traf: static + traffic history    最后几个数据是真值
+        H_traf = self._compute_H_traf(static, S_hist[:,:-self.args.pre_steps], full_edge_index, P_edge=P_edge, weekly_idx=weekly_idx[:,:-self.args.pre_steps], daily_idx=daily_idx[:,:-self.args.pre_steps])     
+
+        # ========== 2) construct direction-aware edge_index & P_edge for co-att ==========
+        # For same node set, we can use reversed edge_index for opposite direction
+        edge_index_traf2traj = edge_index_kmin                     # src in traf, dst in traj
+        edge_index_traj2traf = torch.stack([edge_index_kmin[1], edge_index_kmin[0]], dim=0).to(edge_index_kmin.device)  # reversed 
+
+        # ========== 3) CALL CO-ATTENTION (关键：在两视图都可用时调用) ==========
+        # model.co_attention_exchange 应当实现 single-or-multi-layer 的堆叠（模型内部决定层数）
+        H_traj, H_traf = self._co_attention_exchange(H_traj, H_traf,
+                                                        edge_index_traf2traj=edge_index_traf2traj,
+                                                        edge_index_traj2traf=edge_index_traj2traf,
+                                                        P_edge_traf2traj=None,
+                                                        P_edge_traj2traf=None)  
+         
+        # ========== 4) downstream: trajectory encoding (use co-attended H_traj) ==========
+        B = self.args.batch_size
+        L = self.args.traj_max_len
+        p = float(getattr(self.args, "aug_dropout", 0.2))     
+
+        # 兜底：若 traj_pool 不是长度 B，则尽量对齐（常见是 B=1 的情况）
+        if not isinstance(traj_pool, list):
+            trajs_lists = [[] for _ in range(B)]
+        elif len(traj_pool) == B and (len(traj_pool) == 0 or isinstance(traj_pool[0], list)):
+            trajs_lists = traj_pool
+        elif len(traj_pool) == 1 and isinstance(traj_pool[0], list) and B > 1:
+            # 只有一个候选列表，但 batch 想要 B 条，就重复使用该列表
+            trajs_lists = [traj_pool[0] for _ in range(B)]
+        else:
+            # 最差兜底：把所有候选合并后，均分/重复
+            flat = [tb for tlist in traj_pool for tb in (tlist if isinstance(tlist, list) else [])]
+            if len(flat) == 0:
+                trajs_lists = [[] for _ in range(B)]
+            else:
+                trajs_lists = [flat for _ in range(B)]
+
+        # traj_pool: [[([node_seq],[time_bin_seq]), ...]]
+        # 采样 B 条轨迹（全局随机）
+        # 每个样本各抽一条轨迹 (nodes, bins)
+        picked = []
+        for b in range(B):
+            cand = trajs_lists[b]
+            if isinstance(cand, list) and len(cand) > 0:
+                picked.append(random.choice(cand))
+            else:
+                picked.append(([], []))  # 空则占位
+        
+        nodes_list = [seq if isinstance(seq, (list, tuple)) else list(seq) for (seq, _) in picked]
+        bins_list  = [ts  if isinstance(ts,  (list, tuple)) else list(ts)  for (_, ts) in picked]
+        # 防止空轨迹：用 [0] 占位（后续会 clamp 到 [0, N-1]）
+        nodes_list = [seq if len(seq) > 0 else [0] for seq in nodes_list]
+        bins_list  = [ts  if len(ts)  > 0 else [0] for ts  in bins_list]
+
+        # 视图1：按概率丢弃（至少保留一个）
+        v1_nodes = [[n for n in seq if random.random() > p] or [seq[0]] for seq in nodes_list]
+
+        # 视图2：按概率扰动为邻近 id（mod 到合法范围）
+        N = static.shape[0]  # 含 UNK
+        # 视图2：按概率扰动为邻近 id
+        v2_nodes = [[((n + random.randint(-2, 2)) % N) if random.random() < p else n for n in seq]
+                    for seq in nodes_list]
+
+        v1_padded   = pad_trajs(v1_nodes, L, lambda s: s[-1] if len(s) > 0 else 0)
+        v2_padded   = pad_trajs(v2_nodes, L, lambda s: s[-1] if len(s) > 0 else 0)
+        times_padded = pad_trajs(bins_list, L, lambda s: s[-1] if len(s) > 0 else 0)
+        v1 = torch.LongTensor(v1_padded).to(self.args.device)
+        v2 = torch.LongTensor(v2_padded).to(self.args.device)
+        N = static.shape[0]
+        v1.clamp_(0, N-1)
+        v2.clamp_(0, N-1)
+
+        times = torch.as_tensor(times_padded, dtype=torch.float32, device=self.args.device)  # (B, L)
+        # Traj encoding MUST use H_traj (co-attended)
+        r1, mtp_logits1, mtp_time1 = self._forward_traj(H_traj, v1, times)  # B x d, B x L x N, B x L
+        r2, mtp_logits2, mtp_time2 = self._forward_traj(H_traj, v2, times)
+
+        # MTP losses
+        mask = (torch.rand(B, L, device=self.args.device) < self.args.mtp_mask_ratio)
+
+        # Matching: use co-attended H_traf aggregated over trajectory nodes
+        if H_traf.dim() == 2:  # (N, d)
+            node_embs = H_traf[v1]  # (B, L, d)
+        elif H_traf.dim() == 3:  # (B, N, d)
+            B = H_traf.size(0)
+            bidx = torch.arange(B, device=H_traf.device).unsqueeze(-1).expand_as(v1)
+            node_embs = H_traf[bidx, v1, :]  # (B, L, d)
+        else:
+            raise ValueError(f"Unexpected H_traf shape: {H_traf.shape}")
+        node_avg = node_embs.mean(dim=1)  # (B, d)
+
+        T = S_hist.shape[0]
+        mask_T = (torch.rand(T, device=self.args.device) < 0.15)
+        S_hist_masked = S_hist[:,:-self.args.pre_steps].clone()
+        S_hist_masked[mask_T] = 0.0
+        H_masked = self._compute_H_traf(static, S_hist_masked, full_edge_index , P_edge=P_edge, weekly_idx=weekly_idx[:,-self.args.pre_steps:], daily_idx=daily_idx[:,-self.args.pre_steps:])
+        pred_next_mask = self.predict_next_state(H_masked)
+        true_next_mask = S_hist[:,-self.args.pre_steps].reshape(B,S_hist_masked.shape[2],-1).to(self.args.device)
+
+        return (r1, mtp_logits1, mtp_time1), (r2, mtp_logits2, mtp_time2), mask, v1, times, node_avg, pred_next_mask, true_next_mask, mask_T

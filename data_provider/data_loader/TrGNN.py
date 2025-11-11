@@ -17,7 +17,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-class SF20_forTrGNN_Dataset(Dataset):
+class SF20_forTrGNN_Dataset(Dataset):  #TODO: 把sf删掉大部分低流量路段
     """
     SF20 for TrGNN Dataset
     """

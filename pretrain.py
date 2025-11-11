@@ -13,6 +13,7 @@ import torch
 import numpy as np
 import random
 import os
+import time
 from tqdm import tqdm
 from utils.metrics import nt_xent_loss, mtp_loss, mtp_time_loss, mask_state_loss, match_nt_xent
 from models.TRACK import Model
@@ -39,9 +40,13 @@ def run_pretrain(model, dataloader, optimizer, args):
     loss_history = []
 
     for epoch in range(args.pretrain_epochs):
+        iter_count = 0
+        train_loss = []
+        epoch_time = time.time()
         running = 0.0
         pbar = tqdm(dataloader, desc=f"Pretrain {epoch+1}/{args.pretrain_epochs}")
         for batch in pbar:
+            iter_count += 1
             # required fields from dataset
             full_edge_index  = batch['full_edge_index'].to(device)   # 2 x E (LongTensor)
             P_edge = batch['P_edge_full'].to(device)           # E (FloatTensor)
@@ -58,9 +63,9 @@ def run_pretrain(model, dataloader, optimizer, args):
 
             # ========== 1) compute separate view representations ==========
             # H_traj: strict static-only per paper eq(1)
-            H_traj = model.compute_H_traj(static, full_edge_index)  # N x d
+            H_traj = model._compute_H_traj(static, full_edge_index)  # N x d
             # H_traf: static + traffic history
-            H_traf = model.compute_H_traf(static, S_hist, full_edge_index, P_edge=P_edge, weekly_idx=weekly_idx, daily_idx=daily_idx)
+            H_traf = model._compute_H_traf(static, S_hist, full_edge_index, P_edge=P_edge, weekly_idx=weekly_idx, daily_idx=daily_idx)
 
             # ========== 2) construct direction-aware edge_index & P_edge for co-att ==========
             # For same node set, we can use reversed edge_index for opposite direction
@@ -69,7 +74,7 @@ def run_pretrain(model, dataloader, optimizer, args):
 
             # ========== 3) CALL CO-ATTENTION (关键：在两视图都可用时调用) ==========
             # model.co_attention_exchange 应当实现 single-or-multi-layer 的堆叠（模型内部决定层数）
-            H_traj, H_traf = model.co_attention_exchange(H_traj, H_traf,
+            H_traj, H_traf = model._co_attention_exchange(H_traj, H_traf,
                                                          edge_index_traf2traj=edge_index_traf2traj,
                                                          edge_index_traj2traf=edge_index_traj2traf,
                                                          P_edge_traf2traj=None,
@@ -132,10 +137,9 @@ def run_pretrain(model, dataloader, optimizer, args):
             v2.clamp_(0, N-1)
 
             times = torch.as_tensor(times_padded, dtype=torch.float32, device=device)  # (B, L)
-            #TODO: V1的维度确定
             # Traj encoding MUST use H_traj (co-attended)
-            r1, mtp_logits1, mtp_time1 = model.forward_traj(H_traj, v1, times)  # B x d, B x L x N, B x L
-            r2, mtp_logits2, mtp_time2 = model.forward_traj(H_traj, v2, times)
+            r1, mtp_logits1, mtp_time1 = model._forward_traj(H_traj, v1, times)  # B x d, B x L x N, B x L
+            r2, mtp_logits2, mtp_time2 = model._forward_traj(H_traj, v2, times)
 
             # CTL
             loss_ctl = nt_xent_loss(r1, r2, args.contrast_temp)
@@ -146,9 +150,9 @@ def run_pretrain(model, dataloader, optimizer, args):
             loss_mtp_time = mtp_time_loss(mtp_time1, times, mask)
 
             # Traffic mask-state: mask some timesteps and predict last state (simple proxy)
-            T = S_hist.shape[0]
+            T = S_hist.shape[0] - 1
             mask_T = (torch.rand(T, device=device) < 0.15)
-            S_hist_masked = S_hist.clone()
+            S_hist_masked = S_hist[:,-1].clone()
             S_hist_masked[mask_T] = 0.0
             H_masked = model.compute_H_traf(static, S_hist_masked, full_edge_index , P_edge=P_edge, weekly_idx=weekly_idx, daily_idx=daily_idx)
             pred_next_mask = model.predict_next_state(H_masked)
@@ -196,7 +200,7 @@ if __name__ == "__main__":
     argparser.add_argument('--d_model', type=int, default=32, help='Dimension of the model')
     argparser.add_argument('--n_heads', type=int, default=8, help='Number of attention heads')
     argparser.add_argument('--traffic_seq_len', type=int, default=7)
-    argparser.add_argument('--n_nodes', type=int, default=26659)
+    argparser.add_argument('--NumofRoads', type=int, default=26659)
     argparser.add_argument('--pretrain_epochs', type=int, default=100, help='Number of pretraining epochs')
     argparser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')
     argparser.add_argument('--gpu', type=int, default=0, help='gpu')
@@ -220,12 +224,12 @@ if __name__ == "__main__":
         else:
             args.device = torch.device("cpu")
         print('Using cpu or mps')
-    dataset = TRACKDataset("data/sf_data/raw")
+    dataset = TRACKDataset("data/sf_data/raw",flag='train', args=args)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=dataset.collate_fn, drop_last=True)
     N = int(dataset.static.shape[0])  
     has_unk = (len(getattr(dataset, "idx2seg", [])) > 0 and dataset.idx2seg[-1] == "UNK")
     N_graph = N - 1 if has_unk else N   
-    args.n_nodes = N    
+    args.NumofRoads = N    
     print(f"[pretrain] N_total={N}, N_graph={N_graph}, has_unk={has_unk}")
 
     model = Model(args)  # Initialize your model with appropriate args

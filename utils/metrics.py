@@ -2,6 +2,20 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+def TRACK_loss(r1, r2, mtp_logits1, v1, mask, mtp_time1, times, pred_next_mask, true_next_mask, mask_T, node_avg, args):
+    """
+    计算 TRACK 的总损失
+    """
+    loss_ctl = nt_xent_loss(r1, r2, temperature=args.contrast_temp)
+    loss_mtp_seg = mtp_loss(mtp_logits1, v1, mask)
+    loss_mtp_time = mtp_time_loss(mtp_time1, times, mask)
+    loss_mask_state = mask_state_loss(pred_next_mask, true_next_mask, mask_T)
+    loss_match = match_nt_xent(r1, node_avg, temperature=args.contrast_temp)
+    loss = args.lambda_traj * (loss_ctl + loss_mtp_seg + 0.5 * loss_mtp_time) \
+            + args.lambda_traf * loss_mask_state \
+            + args.lambda_match * loss_match
+    return loss
+
 def nt_xent_loss(z1, z2, temperature=0.1):
     """
     支持输入:
