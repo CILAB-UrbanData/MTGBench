@@ -833,7 +833,7 @@ class TRACKDataset(Dataset):
             'daily_idx': daily,
             'trajs': trajs,
             'time_idx': time_idxs
-        }   
+        }, S_hist[:,-self.args.pre_steps].reshape(B,self.args.NumofRoads,-1)
 
 if __name__ == "__main__":
     # 示例用法

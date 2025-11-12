@@ -1,9 +1,9 @@
 import torch, os, wandb
 import time
-from tqdm import tqdm
 import numpy as np
 import torch.nn as nn
 from utils.tools import EarlyStopping, adjust_learning_rate
+from utils.metrics import next_state_loss
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from data_provider.data_factory import data_provider
 from exp.exp_basic import Exp_Basic
@@ -82,6 +82,8 @@ class ExpPrediction(Exp_Basic):
     def _select_criterion(self):
         if self.args.model == "Trajnet" or self.args.model == "MDTP" or self.args.model == "MDTPmini":
             criterion = nn.L1Loss()
+        elif self.args.model == "TRACK":
+            criterion = next_state_loss
         else:
             criterion = nn.MSELoss()
         return criterion
@@ -96,7 +98,7 @@ class ExpPrediction(Exp_Basic):
             self.model.reset_state()
 
         with torch.no_grad():
-            for i, (inputs, target) in tqdm(enumerate(data_loader), desc='validate', total=len(data_loader)):
+            for i, (inputs, target) in enumerate(data_loader):
                 target = target.to(self.args.device)
                 if self.args.use_amp:
                     with torch.amp.autocast():
@@ -141,7 +143,7 @@ class ExpPrediction(Exp_Basic):
             if hasattr(self.model, "reset_state"):
                 self.model.reset_state()
 
-            for i, (inputs, target) in tqdm(enumerate(train_loader), desc=f'train, epoch: {epoch + 1}', total=len(train_loader)):
+            for i, (inputs, target) in enumerate(train_loader):
                 iter_count += 1
                 self.model_optim.zero_grad()
 

@@ -79,6 +79,7 @@ if __name__ == '__main__':
     parser.add_argument('--lambda_traj', type=float, default=1.0, help='Weight for trajectory losses')
     parser.add_argument('--lambda_traf', type=float, default=1.0, help='Weight for traffic view losses')
     parser.add_argument('--lambda_match', type=float, default=1.0, help='Weight for matching loss')
+    parser.add_argument('--load_pretrained', action='store_true', help='whether to load pretrained model', default=False)
 
     # optimization
     parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')

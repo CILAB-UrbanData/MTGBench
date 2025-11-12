@@ -1,6 +1,5 @@
 import torch, os, wandb
 import time
-from tqdm import tqdm
 import numpy as np
 import torch.nn as nn
 from utils.tools import EarlyStopping, adjust_learning_rate
@@ -108,7 +107,7 @@ class ExpTRACKPre(Exp_Basic):
             self.model.train()
             epoch_time = time.time()
 
-            for i, batch in tqdm(enumerate(train_loader), desc=f'train, epoch: {epoch + 1}', total=len(train_loader)):
+            for i, (batch, _) in enumerate(train_loader):
                 iter_count += 1
                 self.model_optim.zero_grad()
 

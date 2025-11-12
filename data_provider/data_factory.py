@@ -50,6 +50,15 @@ def data_provider(args, flag='train'):
                 normalization=args.normalization,
                 S=args.S
             )
+        
+        elif args.data == 'TRACK':
+            drop_last = True 
+            shuffle_flag = True 
+            data_set = Data(
+                data_root = args.root_path,
+                flag = flag,
+                args = args
+            )
 
         print(flag, len(data_set))
         data_loader = DataLoader(
@@ -60,10 +69,13 @@ def data_provider(args, flag='train'):
             drop_last=drop_last,
             collate_fn=data_set.collate_fn if hasattr(data_set, 'collate_fn') else None)
         return data_set, data_loader
+    
     elif args.task_name == 'TRACK_pretrain':
         drop_last = True 
         shuffle_flag = True 
-        data_set = Data(data_root = args.root_path, flag = flag, args = args)
+        data_set = Data(data_root = args.root_path, 
+                        flag = flag, 
+                        args = args)
 
         print(flag, len(data_set))
         data_loader = DataLoader(

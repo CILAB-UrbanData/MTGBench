@@ -3,6 +3,7 @@ import torch, math
 import torch.nn as nn
 import torch.nn.functional as F
 import random
+import os
 from layers.TRACK_attention import StaticSparseGAT, CoAttLayer, CrossSparseGAT
 
 def pairwise_geo_distance(static_feats):
@@ -102,6 +103,10 @@ class Model(nn.Module):
         self.traj_trans = TrajectoryTransformer(args)
         self.coatt_blocks = nn.ModuleList([CoAttLayer(args) for _ in range(getattr(args, 'n_coatt_layers', 2))])
         self.state_head = nn.Linear(args.d_model, getattr(args, 'pre_steps', 1))
+        if self.args.load_pretrained and os.path.exists('checkpoints/TRACK_pretrain_test_TRACK_TRACK_lr_0.001_ba_4_epo_50_itr_0/checkpoint.pth'):
+            self.load_state_dict(torch.load('checkpoints/TRACK_pretrain_test_TRACK_TRACK_lr_0.001_ba_4_epo_50_itr_0/checkpoint.pth', 
+                                            map_location=self.args.device))
+            print("Loaded pretrained.pth")
 
     # --------- 工具：把 edge_index 复制 B 份并做偏移（+b*N） ----------
     def _tile_edge_index(self, edge_index: torch.Tensor, B: int, N: int) -> torch.Tensor:
@@ -226,7 +231,8 @@ class Model(nn.Module):
         # H_traj: strict static-only per paper eq(1)
         H_traj = self._compute_H_traj(static, full_edge_index)  # N x d
         # H_traf: static + traffic history    最后几个数据是真值
-        H_traf = self._compute_H_traf(static, S_hist[:,:-self.args.pre_steps], full_edge_index, P_edge=P_edge, weekly_idx=weekly_idx[:,:-self.args.pre_steps], daily_idx=daily_idx[:,:-self.args.pre_steps])     
+        H_traf = self._compute_H_traf(static, S_hist[:,:-self.args.pre_steps], 
+                                      full_edge_index, P_edge=P_edge, weekly_idx=weekly_idx[:,:-self.args.pre_steps], daily_idx=daily_idx[:,:-self.args.pre_steps])     
 
         # ========== 2) construct direction-aware edge_index & P_edge for co-att ==========
         # For same node set, we can use reversed edge_index for opposite direction
@@ -325,3 +331,44 @@ class Model(nn.Module):
         true_next_mask = S_hist[:,-self.args.pre_steps].reshape(B,S_hist_masked.shape[2],-1).to(self.args.device)
 
         return (r1, mtp_logits1, mtp_time1), (r2, mtp_logits2, mtp_time2), mask, v1, times, node_avg, pred_next_mask, true_next_mask, mask_T
+
+    def forward(self, batch):
+        """
+        标准的预测任务 forward 流程
+        """
+        full_edge_index  = batch['full_edge_index'].to(self.args.device)   # 2 x E (LongTensor)
+        P_edge = batch['P_edge_full'].to(self.args.device)           # E (FloatTensor)
+        static = batch['static'].to(self.args.device)           # N x C
+        S_hist = batch['S_hist'].to(self.args.device)           # T x N x C_state
+        edge_index_kmin = batch['edge_index'].to(self.args.device)  # 2 x E_kmin (LongTensor)
+        weekly_idx = batch.get('weekly_idx', None)
+        daily_idx = batch.get('daily_idx', None)
+        if weekly_idx is not None:
+            weekly_idx = weekly_idx.to(self.args.device)
+        if daily_idx is not None:
+            daily_idx = daily_idx.to(self.args.device)
+        traj_pool = batch['trajs']  # list of (nodes, times)   
+
+        # ========== 1) compute separate view representations ==========
+        # H_traj: strict static-only per paper eq(1)
+        H_traj = self._compute_H_traj(static, full_edge_index)  # N x d
+        # H_traf: static + traffic history    最后几个数据是真值
+        H_traf = self._compute_H_traf(static, S_hist[:,:-self.args.pre_steps], 
+                                      full_edge_index, P_edge=P_edge, weekly_idx=weekly_idx[:,:-self.args.pre_steps], daily_idx=daily_idx[:,:-self.args.pre_steps])     
+
+        # ========== 2) construct direction-aware edge_index & P_edge for co-att ==========
+        # For same node set, we can use reversed edge_index for opposite direction
+        edge_index_traf2traj = edge_index_kmin                     # src in traf, dst in traj
+        edge_index_traj2traf = torch.stack([edge_index_kmin[1], edge_index_kmin[0]], dim=0).to(edge_index_kmin.device)  # reversed 
+
+        # ========== 3) CALL CO-ATTENTION (关键：在两视图都可用时调用) ==========
+        # model.co_attention_exchange 应当实现 single-or-multi-layer 的堆叠（模型内部决定层数）
+        H_traj, H_traf = self._co_attention_exchange(H_traj, H_traf,
+                                                        edge_index_traf2traj=edge_index_traf2traj,
+                                                        edge_index_traj2traf=edge_index_traj2traf,
+                                                        P_edge_traf2traj=None,
+                                                        P_edge_traj2traf=None)  
+        pred_next_mask = self.predict_next_state(H_traf)
+
+        return pred_next_mask
+        
