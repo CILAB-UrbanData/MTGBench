@@ -1,18 +1,17 @@
-export CUDA_VISIBLE_DEVICES=1
-
-model_name=MDTP
+export CUDA_VISIBLE_DEVICES=0,1
+model_name=MDTPsingle
 
 python -u run.py \
   --task_name TrafficPrediction\
   --is_training 1 \
-  --root_path ./data/NYC_Taxi\&Bike/MDTP/processed \
+  --root_path data/sf_data/MDTP/processed\
   --model $model_name \
-  --data MDTP \
+  --data OtherForMDTP \
   --normalization True \
   --learning_rate 0.0001 \
   --batch_size 32 \
   --lradj 'type4' \
-  --N_regions 264 \
+  --N_regions 163 \
   --itr 10 \
   --train_epochs 200 \
   --patience 20 \

@@ -311,7 +311,7 @@ def date_range(date1, date2):
     datetime1 = dt.strptime(date1, '%Y%m%d')
     datetime2 = dt.strptime(date2, '%Y%m%d')
     days = (datetime2 - datetime1).days + 1
-    date_list = [(datetime1 + timedelta(day)).strftime('%Y%m%d') for day in range(days)]  #Gaiya的处理要在%y_%m%d格式下进行
+    date_list = [(datetime1 + timedelta(day)).strftime('%Y_%m%d') for day in range(days)]  #TODO:Gaiya的处理要在%y_%m%d格式下进行,适配
     return date_list
 
 def time_difference(time1, time2):

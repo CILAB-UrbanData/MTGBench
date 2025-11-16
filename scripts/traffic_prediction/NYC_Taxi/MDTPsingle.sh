@@ -1,11 +1,12 @@
-model_name=MDTP
+export CUDA_VISIBLE_DEVICES=0,1
+model_name=MDTPsingle
 
 python -u run.py \
   --task_name TrafficPrediction\
   --is_training 1 \
   --root_path ./data/NYC_Taxi\&Bike/MDTP/processed \
   --model $model_name \
-  --data MDTP \
+  --data MDTPsingle \
   --normalization True \
   --learning_rate 0.0001 \
   --batch_size 32 \

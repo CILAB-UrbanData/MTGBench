@@ -68,7 +68,7 @@ if __name__ == '__main__':
     parser.add_argument('--warmup_epochs', type=int, default=5, help='number of warmup epochs')
     parser.add_argument('--min_lr_ratio', type=float, default=5e-5, help='minimum learning rate ratio')
     
-    '''TRACK pretrain args'''
+    '''TRACK args'''
     parser.add_argument('--static_feat_dim', type=int, default=3)
     parser.add_argument('--d_model', type=int, default=32, help='Dimension of the model')
     parser.add_argument('--n_heads', type=int, default=8, help='Number of attention heads')

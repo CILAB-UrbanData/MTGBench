@@ -1,3 +1,4 @@
+import math
 import torch, os, wandb
 import time
 import numpy as np
@@ -233,9 +234,15 @@ class ExpPrediction(Exp_Basic):
                 if self.args.model == 'MDTP':   
                     pred = pred.cpu().numpy().reshape(-1, 4)
                     true = targets.cpu().numpy().reshape(-1, 4)     
-                elif self.args.model == 'MDTPmini':    
+                    true[:,:2] = true[:, :2] * (test_data.Y_taxi_max - test_data.Y_taxi_min) + test_data.Y_taxi_min
+                    true[:,2:] = true[:, 2:] * (test_data.Y_bike_max - test_data.Y_bike_min) + test_data.Y_bike_min
+                    pred[:,:2] = pred[:, :2] * (test_data.X_taxi_max - test_data.X_taxi_min) + test_data.X_taxi_min
+                    pred[:,2:] = pred[:, 2:] * (test_data.X_bike_max - test_data.X_bike_min) + test_data.X_bike_min
+                elif self.args.model == 'MDTPsingle':    
                     pred = pred.cpu().numpy().reshape(-1, 2)
-                    true = targets.cpu().numpy().reshape(-1, 2)   
+                    true = targets.cpu().numpy().reshape(-1, 2)  
+                    true[:, :] = true[:, :] * (test_data.Y_taxi_max - test_data.Y_taxi_min) + test_data.Y_taxi_min
+                    pred[:, :] = pred[:, :] * (test_data.X_taxi_max - test_data.X_taxi_min) + test_data.X_taxi_min
                 elif self.args.model == 'TrGNN':
                     pred = test_data.scaler.inverse_transform(pred.cpu().numpy()).reshape(-1, self.args.pre_steps)
                     true = test_data.scaler.inverse_transform(targets.cpu().numpy()).reshape(-1, self.args.pre_steps)
@@ -253,7 +260,7 @@ class ExpPrediction(Exp_Basic):
         print(f"Sample true values: {y_trues[:5]}")
 
         mae  = mean_absolute_error(y_trues, y_preds)
-        rmse = mean_squared_error(y_trues, y_preds)
+        rmse = math.sqrt(mean_squared_error(y_trues, y_preds))
         mape = np.mean(np.abs((y_trues - y_preds) / (y_trues + 1))) * 100
         metrics = {'MAE': mae, 'RMSE': rmse, 'MAPE': mape}
         print(f"Test MAE {mae:.4f}, RMSE {rmse:.4f}, MAPE {mape:.2f}%")

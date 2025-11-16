@@ -24,12 +24,12 @@ def build_full_segment_vocab_from_trajs_and_edge(raw_map, roadid_col=None, out_v
     """
     segs = set()
     if os.path.exists(raw_map):
-        cols_to_keep = [roadid_col, "length"]
+        cols_to_keep = [roadid_col]
         cols_to_copy = [roadid_col]
         new_col_name = "weight"
         speed = 583  # m/min ~ 35km/h
         gdf = gpd.read_file(raw_map)
-        missing_cols = [c for c in cols_to_keep if c not in gdf.columns]
+        missing_cols = [c for c in cols_to_keep if c not in gdf.columns]  
         if missing_cols:
             raise ValueError(f"以下字段在源文件中不存在: {missing_cols}")
         new_gdf = gdf[cols_to_copy].copy()
@@ -444,13 +444,17 @@ class TRACKDataset(Dataset):
         if traffic_ts_file is None:
             traffic_ts_file = os.path.join(data_root, 'flow.npy')
         if road_shp_file is None:
-            road_shp_file = os.path.join(data_root, 'map/edges.shp')
+            # road_shp_file = os.path.join(data_root, 'map/edges.shp')  sf
+            road_shp_file = os.path.join(data_root, 'roads_chengdu.shp')
         if traj_file is None:
-            traj_file = os.path.join(data_root, 'traj_train_100.csv')
+            # traj_file = os.path.join(data_root, 'traj_train_100.csv')  sg
+            traj_file = os.path.join(data_root, 'traj_converted.csv')
         if roadid_col is None:
-            roadid_col = 'fid'
+            # roadid_col = 'fid'  sf
+            roadid_col = 'edge_id'
         if feature_cols is None:
-            feature_cols = ['length', 'lanes', 'oneway']
+            # feature_cols = ['length', 'lanes', 'oneway']  sf
+            feature_cols = ['bridge','tunnel','oneway']
 
         self.data_root = data_root
         self.args = args
@@ -469,7 +473,7 @@ class TRACKDataset(Dataset):
         self.min_flow_count = int(min_flow_count)
 
         # 1) 初始 vocab
-        vocab_cache = os.path.join(cache_dir, 'segment_vocab.pkl')
+        vocab_cache = os.path.join(cache_dir, f"{os.path.basename(self.traj_file)}_segment_vocab.pkl")
         if os.path.exists(vocab_cache) and not force_recompute:
             with open(vocab_cache, 'rb') as fh:
                 tmp = pickle.load(fh)
@@ -534,56 +538,132 @@ class TRACKDataset(Dataset):
             self.static = torch.vstack([self.static, pad])
 
         # 4) 解析轨迹，并收集转移统计
+        # --------------------------------------------------
+        # 先初始化这几个成员 / 变量
         self.trajs_by_timebin = defaultdict(list)
         self.global_traj_pool = []
         transitions_samples = defaultdict(list)
         transitions_counts = Counter()
 
-        traj_df = pd.read_csv(self.traj_file, header=None)
-        traj_df.columns = ['driver', 'traj_id', 'start_end', 'traj']
-        points_col = 'traj'
-        traj_col = 'traj_id'
+        # ---- (1) 为 out_rows 做磁盘缓存 ----
+        traj_cache = os.path.join(
+            self.cache_dir,
+            f"traj_out_rows_{os.path.basename(self.traj_file)}.pkl"
+        )
 
-        out_rows = []
-        for ridx, row in traj_df.iterrows():
-            points_field = row.get(points_col)
-            if pd.isna(points_field):
-                continue
-            try:
-                pts = parse_points_from_field(points_field)
-            except Exception as e:
-                print(f"Warning: cannot parse points in CSV row {ridx}: {e}", file=sys.stderr)
-                continue
-            traj_id = str(row.get(traj_col, ridx))
-            for (road_id, ts) in pts:
-                out_rows.append((traj_id, int(ts), road_id))
+        if os.path.exists(traj_cache) and not self.force_recompute:
+            # 直接从缓存加载 out_rows
+            with open(traj_cache, "rb") as f:
+                out_rows = pickle.load(f)
+            print(f"[Dataset] load cached out_rows from {traj_cache}, size={len(out_rows)}")
+        else:
+            # 首次或强制重算：从 CSV 解析
+            traj_df = pd.read_csv(self.traj_file, header=None)
+            traj_df.columns = ['driver', 'traj_id', 'start_end', 'traj']
+            points_col = 'traj'
+            traj_col = 'traj_id'
 
-        out_rows.sort(key=lambda x: (x[0], x[1]))
-        traj_map = defaultdict(list)
-        for traj_id, ts, raw in out_rows:
-            if raw in self.seg2idx:
-                seg = self.seg2idx[raw]
-            else:
-                if self.unk_idx is not None:
-                    seg = self.unk_idx
-                else:
+            out_rows = []
+            for ridx, row in traj_df.iterrows():
+                points_field = row.get(points_col)
+                if pd.isna(points_field):
                     continue
-            traj_map[traj_id].append((ts, seg))
+                try:
+                    pts = parse_points_from_field(points_field)
+                except Exception as e:
+                    print(f"Warning: cannot parse points in CSV row {ridx}: {e}", file=sys.stderr)
+                    continue
+                traj_id = str(row.get(traj_col, ridx))
+                for (road_id, ts) in pts:
+                    out_rows.append((traj_id, int(ts), road_id))
 
-        for traj_id, recs in traj_map.items():
-            recs.sort()
-            times = [r[0] for r in recs]
-            nodes = [r[1] for r in recs]
-            bins = [int((t // 3600) % self.num_time_bins) for t in times]
-            self.global_traj_pool.append((nodes, bins))
-            if len(bins) > 0:
-                bin_idx = bins[-1]
-                self.trajs_by_timebin[bin_idx].append((nodes, bins))
-            for (t0, s0), (t1, s1) in zip(recs[:-1], recs[1:]):
-                transitions_counts[(s0, s1)] += 1
-                dt_min = (t1 - t0) / 60.0
-                transitions_samples[(s0, s1)].append(dt_min)
+            out_rows.sort(key=lambda x: (x[0], x[1]))
 
+            # 写入缓存
+            with open(traj_cache, "wb") as f:
+                pickle.dump(out_rows, f, protocol=pickle.HIGHEST_PROTOCOL)
+            print(f"[Dataset] save out_rows cache to {traj_cache}, size={len(out_rows)}")
+
+        # ---- (2) 为转移统计 + 轨迹池也做磁盘缓存 ----
+        stats_cache = os.path.join(
+            self.cache_dir,
+            f"traj_stats_{os.path.basename(self.traj_file)}.pkl"
+        )
+
+        if os.path.exists(stats_cache) and not self.force_recompute:
+            # 命中缓存：直接读取转移统计 & trajs_by_timebin & global_traj_pool
+            with open(stats_cache, "rb") as f:
+                stats = pickle.load(f)
+
+            # 可能存成普通 dict，这里统一成 defaultdict/list
+            tb = stats.get("trajs_by_timebin", {})
+            self.trajs_by_timebin = defaultdict(list, tb)
+            self.global_traj_pool = stats.get("global_traj_pool", [])
+
+            transitions_counts = stats.get("transitions_counts", Counter())
+            # 注意：可能存成普通 dict，这里统一成 defaultdict(list)
+            tsmp = stats.get("transitions_samples", {})
+            transitions_samples = defaultdict(list, tsmp)
+
+            print(
+                f"[Dataset] load cached traj stats from {stats_cache}; "
+                f"timebins={len(self.trajs_by_timebin)}, "
+                f"global_trajs={len(self.global_traj_pool)}, "
+                f"num_transitions={len(transitions_counts)}"
+            )
+        else:
+            # 没有缓存：根据 out_rows 重新构建所有统计量
+            traj_map = defaultdict(list)
+            for traj_id, ts, raw in out_rows:
+                if raw in self.seg2idx:
+                    seg = self.seg2idx[raw]
+                else:
+                    if self.unk_idx is not None:
+                        seg = self.unk_idx
+                    else:
+                        continue
+                traj_map[traj_id].append((ts, seg))
+
+            for traj_id, recs in traj_map.items():
+                # 先按时间排序
+                recs.sort()
+                times = [r[0] for r in recs]
+                nodes = [r[1] for r in recs]
+                # 按小时 -> 时间 bin
+                bins = [int((t // 3600) % self.num_time_bins) for t in times]
+
+                # 全局轨迹池
+                self.global_traj_pool.append((nodes, bins))
+
+                # 按「最后一个时间点」所属的 timebin 分类
+                if len(bins) > 0:
+                    bin_idx = bins[-1]
+                    self.trajs_by_timebin[bin_idx].append((nodes, bins))
+
+                # 收集转移统计
+                for (t0, s0), (t1, s1) in zip(recs[:-1], recs[1:]):
+                    transitions_counts[(s0, s1)] += 1
+                    dt_min = (t1 - t0) / 60.0
+                    transitions_samples[(s0, s1)].append(dt_min)
+
+            # 写入缓存（全部打包在一起）
+            stats = {
+                "trajs_by_timebin": dict(self.trajs_by_timebin),  # defaultdict -> dict
+                "global_traj_pool": list(self.global_traj_pool),
+                "transitions_counts": transitions_counts,
+                "transitions_samples": dict(transitions_samples),  # defaultdict -> dict
+            }
+            with open(stats_cache, "wb") as f:
+                pickle.dump(stats, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+            print(
+                f"[Dataset] save traj stats cache to {stats_cache}; "
+                f"timebins={len(self.trajs_by_timebin)}, "
+                f"global_trajs={len(self.global_traj_pool)}, "
+                f"num_transitions={len(transitions_counts)}"
+            )
+
+        # transitions_counts / transitions_samples 后面还会被 P_time / travel_time 使用
         # ====== 辅助: 缓存名签名 + 校验/清洗 ======
         # 这三个方法定义为成员，供后续使用
         # （为了让整文件自包含，直接写在类里，PyCharm/VSCode 可跳转）
@@ -837,6 +917,7 @@ class TRACKDataset(Dataset):
 
 if __name__ == "__main__":
     # 示例用法
-    data_root = 'data/sf_data/raw'
-    dataset = TRACKDataset(data_root, flag='train', args={})
+    data_root = 'data/GaiyaData/TRACK'
+    dataset = TRACKDataset(data_root, flag='train', args={},road_shp_file="data/GaiyaData/TRACK/roads_chengdu.shp",
+                           traj_file="data/GaiyaData/TRACK/traj_converted.csv",roadid_col='edge_id',feature_cols=['bridge','tunnel','oneway'],cache_dir='./cache',force_recompute=True)
     print(f"NumofRoads: {int(dataset.static.shape[0])}")

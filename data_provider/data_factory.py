@@ -1,12 +1,14 @@
-from data_provider.data_loader import MDTPRawloader, SF20_forTrajnet_Dataset, SF20_forTrGNN_Dataset, GaiyaForMDTP, DiDi_forTrGNN_Dataset, DiDi_forTrajnet_Dataset, TRACKDataset
+from data_provider.data_loader import MDTPRawloader, SF20_forTrajnet_Dataset, \
+    SF20_forTrGNN_Dataset, OtherForMDTP, DiDi_forTrGNN_Dataset, DiDi_forTrajnet_Dataset, TRACKDataset, MDTPSingleLoader, SF_forTrGNN_Dataset
 from torch.utils.data import DataLoader, Subset
 import random
 
 data_dict = {
     'MDTP': MDTPRawloader,
-    'GaiyaForMDTP': GaiyaForMDTP,
+    'MDTPsingle': MDTPSingleLoader,
+    'OtherForMDTP': OtherForMDTP,
     'Trajnet': SF20_forTrajnet_Dataset,
-    'TrGNN': SF20_forTrGNN_Dataset,
+    'TrGNN': SF_forTrGNN_Dataset,
     'DiDiTrGNN': DiDi_forTrGNN_Dataset,
     'DiDiTrajnet': DiDi_forTrajnet_Dataset,
     'TRACK': TRACKDataset,
@@ -29,18 +31,15 @@ def data_provider(args, flag='train'):
                 root_path=args.root_path,
             )
 
-        elif args.data == 'TrGNN' or args.data == 'DiDiTrGNN':
+        elif args.data == 'TrGNN' or args.data == 'DiDiTrGNN' :
             drop_last = False
             shuffle_flag = True
             data_set = Data(
                 args = args,
-                flag = flag,
-                start_date = args.start_date,
-                end_date = args.end_date,
-                root_path = args.root_path
+                flag = flag
             )
         
-        elif args.data == 'MDTP' or args.data == 'GaiyaForMDTP':
+        elif args.data == 'MDTP' or args.data == 'OtherForMDTP'or args.data == 'MDTPsingle':
             drop_last = True
             shuffle_flag = False
             data_set = Data(

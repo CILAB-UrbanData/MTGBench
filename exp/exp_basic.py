@@ -7,7 +7,7 @@ class Exp_Basic(object):
         self.args = args
         self.model_dict = {
             'MDTP': MDTP,
-            'MDTPmini': MDTPSingle,
+            'MDTPsingle': MDTPSingle,
             'Trajnet': Trajnet,
             'TrGNN': TrGNN,
             'TRACK': TRACK,

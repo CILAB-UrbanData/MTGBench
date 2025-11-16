@@ -171,7 +171,7 @@ class ExpTRACKPre(Exp_Basic):
         self.model.eval()
         total_loss = []
         with torch.no_grad():
-            for i, batch in enumerate(data_loader):
+            for i, (batch, _) in enumerate(data_loader):
                 if self.args.use_amp:
                     (r1, mtp_logits1, mtp_time1), (r2, mtp_logits2, mtp_time2), mask, v1, times, node_avg, pred_next_mask, true_next_mask, mask_T = \
                         self.model.forward_pretrain(batch)

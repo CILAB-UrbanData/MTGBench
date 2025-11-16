@@ -115,15 +115,6 @@ class Model(nn.Module):
         # linear output
         self.output_layer = ChannelFullyConnected(in_features=4+24+1, channels=args.NumofRoads) # channels=n_road
 
-        # other data stored here for convenience
-        if args.data == 'DiDiTrGNN':
-            with open('/mnt/nas/home/cilab/wyx_ws/Traffic-Benchmark/data/GaiyaData/TrGNN/processed/cache/preprocess_DiDiTrGNN.pkl', 'rb') as f:
-                normalized_flows, transitions_ToD, self.W, self.W_norm = pkl.load(f)
-        elif args.data == 'TrGNN':
-            with open('/mnt/nas/home/cilab/wyx_ws/Traffic-Benchmark/data/sf_data/TrGNN/cache/preprocess_TrGNNsf_20.pkl', 'rb') as f:
-                normalized_flows, transitions_ToD, self.W, self.W_norm = pkl.load(f)
-        self.W = self.W.to(args.device)
-        self.W_norm = self.W_norm.to(args.device)  
         self._init_weights()  
     
     def _init_weights(self):
@@ -146,12 +137,13 @@ class Model(nn.Module):
         # h_init: for GRU. (gru_num_layers, n_road, hidden_size)
         # ToD: road-wise one-hot encoding of hour of day. (n_road, 24)
         # DoW: road-wise indicator. 1 for weekdays, 0 for weekends/PHs. (n_road, 1)
-        X, T, ToD, DoW = input['X'], input['T'], input['ToD'], input['DoW']
+        X, T, ToD, DoW, W_norm = input['X'], input['T'], input['ToD'], input['DoW'], input['W_norm']
 
         X = X.to(self.args.device)
         T = T.to(self.args.device) 
         ToD = ToD.to(self.args.device)
         DoW = DoW.to(self.args.device)
+        W_norm = W_norm.to(self.args.device)
 
         B, H, N = X.shape
         # demand propagation
@@ -164,7 +156,7 @@ class Model(nn.Module):
         # status propagation & attention
         S_list=[]
         for t in range(H):
-            St = graph_propagation_sparse_batch(X[:,t,:], self.W_norm, hop=self.status_hop, dual=True)
+            St = graph_propagation_sparse_batch(X[:,t,:], W_norm, hop=self.status_hop, dual=True)
             S_list.append(St.unsqueeze(1))
         S = torch.cat(S_list, dim=1)  # (B,H,N,1+2*status_hop)
         att = self.attention_layer(S) # attr(B, H, N, demand_hop+1)
