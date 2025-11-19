@@ -1,5 +1,5 @@
 from data_provider.data_loader import MDTPRawloader, SF20_forTrajnet_Dataset, \
-    SF20_forTrGNN_Dataset, OtherForMDTP, DiDi_forTrGNN_Dataset, DiDi_forTrajnet_Dataset, TRACKDataset, MDTPSingleLoader, SF_forTrGNN_Dataset
+    OtherForMDTP, DiDi_forTrGNN_Dataset, DiDi_forTrajnet_Dataset, TRACKDataset, MDTPSingleLoader, SF_forTrGNN_Dataset
 from torch.utils.data import DataLoader, Subset
 import random
 
@@ -34,9 +34,14 @@ def data_provider(args, flag='train'):
         elif args.data == 'TrGNN' or args.data == 'DiDiTrGNN' :
             drop_last = False
             shuffle_flag = True
+            traj_file = args.traj_file
+            preprocess_path = args.preprocess_path 
+            
             data_set = Data(
                 args = args,
-                flag = flag
+                flag = flag,
+                traj_file = traj_file,
+                preprocess_path = preprocess_path,
             )
         
         elif args.data == 'MDTP' or args.data == 'OtherForMDTP'or args.data == 'MDTPsingle':

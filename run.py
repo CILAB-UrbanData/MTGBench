@@ -38,6 +38,9 @@ if __name__ == '__main__':
     parser.add_argument('--pre_steps', type=int, default=6, help='the predictions time steps')
     parser.add_argument('--seq_len', type=int, default=4, help='input sequence length')
     parser.add_argument('--NumofRoads', type=int, default=19621, help='number of nodes in the graph')
+    parser.add_argument('--traj_file', type=str, default=None, help='standard order traj file path')
+    parser.add_argument('--min_flow_count', type=int, default=100, help='minimum flow count for filtering')
+    parser.add_argument('--time_interval', type=int, default=10, help='time interval for flow binning (minutes)')
 
     # model define
     '''MDTP's args'''
@@ -67,6 +70,7 @@ if __name__ == '__main__':
     parser.add_argument('--end_date', type=str, default='20080610')
     parser.add_argument('--warmup_epochs', type=int, default=5, help='number of warmup epochs')
     parser.add_argument('--min_lr_ratio', type=float, default=5e-5, help='minimum learning rate ratio')
+    parser.add_argument('--preprocess_path', type=str, default=None, help='preprocess file path for TrGNN')
     
     '''TRACK args'''
     parser.add_argument('--static_feat_dim', type=int, default=3)

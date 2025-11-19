@@ -3,7 +3,7 @@ model_name=TrGNN
 python -u run.py \
   --task_name TrafficPrediction \
   --is_training 1 \
-  --root_path data/sf_data/raw \
+  --root_path data/Porto/match_jll \
   --model $model_name \
   --data TrGNN \
   --normalization True \
@@ -14,5 +14,7 @@ python -u run.py \
   --train_epochs 100 \
   --patience 20 \
   --pre_steps 1 \
-  --NumofRoads 3165 \
-  --min_flow_count 500 \
+  --NumofRoads 2977 \
+  --traj_file traj_porto.csv \
+  --preprocess_path preprocess_TrGNNporto.pkl \
+  --time_interval 10000 \

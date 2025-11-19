@@ -6,8 +6,10 @@ import pandas as pd
 from shapely import Point
 import torch
 from torch.utils.data import Dataset
+from utils.traj2flow import convert_traj2flow
 from collections import defaultdict, Counter
 import pickle
+import time
 from tqdm import tqdm
 import geopandas as gpd
 import re
@@ -134,64 +136,6 @@ def build_static_features_for_segments(idx2seg, raw_map, feature_cols, static_fi
             static_features[i] = roadid_to_features[seg]
     np.save(static_file, static_features)
     return static_features
-
-
-def convert_traj2flow(traj_file, N, idx2seg=None):
-    records = []
-    traj_df = pd.read_csv(traj_file, header=None)
-    traj_df.columns = ['driver', 'traj_id', 'start_end', 'traj']
-
-    for raw_traj in tqdm(traj_df['traj'], total=len(traj_df), desc='parse trajs'):
-        try:
-            traj_list = ast.literal_eval(raw_traj)
-        except Exception:
-            continue
-        if not traj_list:
-            continue
-
-        seg_ids = [seg[0] for seg in traj_list]
-        ts_vals = [seg[1] for seg in traj_list]
-
-        ts_numeric = pd.to_numeric(pd.Series(ts_vals), errors='coerce')
-        if ts_numeric.notna().any():
-            ts_arr = ts_numeric.values.astype('float64')
-            if (ts_arr > 1e12).sum() > 0:
-                ts_arr = ts_arr / 1000.0
-            try:
-                dt_index = pd.to_datetime(ts_arr.astype('int64'), unit='s', errors='coerce')
-                dt_floored = dt_index.floor('10min')
-            except Exception:
-                dt_index = pd.to_datetime(pd.Series(ts_vals).astype(str), errors='coerce')
-                dt_floored = dt_index.dt.floor('10min')
-        else:
-            dt_index = pd.to_datetime(pd.Series(ts_vals).astype(str), errors='coerce')
-            dt_floored = dt_index.dt.floor('10min')
-
-        for sid, dt_val in zip(seg_ids, dt_floored):
-            if pd.isna(dt_val):
-                continue
-            records.append((sid, dt_val))
-
-    stat_df = pd.DataFrame(records, columns=['segment_id', 'time_bin'])
-    result = stat_df.groupby(['segment_id', 'time_bin']).size().reset_index(name='car_count')
-
-    if idx2seg is not None:
-        all_segments = list(idx2seg)
-    else:
-        all_segments = list(np.arange(0, N))
-
-    full_time_index = pd.date_range(stat_df['time_bin'].min(), stat_df['time_bin'].max(), freq='10min')
-
-    pivot = result.pivot(index='time_bin', columns='segment_id', values='car_count')
-    pivot = pivot.reindex(index=full_time_index, columns=all_segments, fill_value=0)
-    pivot = pivot.fillna(0)
-    pivot_matrix = pivot[all_segments]
-
-    pivot_array = pivot_matrix.to_numpy(dtype=np.int32)
-    pivot_array = pivot_array[..., np.newaxis]
-    np.save(os.path.join(os.path.dirname(traj_file), 'flow.npy'), pivot_array)
-    return pivot_array
-
 
 def parse_points_from_field(field_value: str):
     """
@@ -434,27 +378,28 @@ class TRACKDataset(Dataset):
                  K_min=15,
                  cache_dir='./cache',
                  force_recompute=False,
-                 khop_fallback=2,
-                 min_flow_count=100):
+                 khop_fallback=2):
         super().__init__()
         os.makedirs(cache_dir, exist_ok=True)
 
         if static_file is None:
             static_file = os.path.join(data_root, 'static_features.npy')
         if traffic_ts_file is None:
-            traffic_ts_file = os.path.join(data_root, 'flow.npy')
+            traffic_ts_file = os.path.join(data_root, f'flow_{args.time_interval}min.npy')
         if road_shp_file is None:
-            # road_shp_file = os.path.join(data_root, 'map/edges.shp')  sf
-            road_shp_file = os.path.join(data_root, 'roads_chengdu.shp')
+            road_shp_file = os.path.join(data_root, 'map/edges.shp')  # sf porto
+            # road_shp_file = os.path.join(data_root, 'roads_chengdu.shp')
         if traj_file is None:
-            # traj_file = os.path.join(data_root, 'traj_train_100.csv')  sg
-            traj_file = os.path.join(data_root, 'traj_converted.csv')
+            # traj_file = os.path.join(data_root, 'traj_train_100.csv')  #sf
+            # traj_file = os.path.join(data_root, 'traj_converted.csv')  #chengdu
+            traj_file = os.path.join(data_root, 'traj_porto.csv')  #porto
         if roadid_col is None:
-            # roadid_col = 'fid'  sf
-            roadid_col = 'edge_id'
+            roadid_col = 'fid'  # sf porto 
+            #roadid_col = 'edge_id' #chengdu
         if feature_cols is None:
             # feature_cols = ['length', 'lanes', 'oneway']  sf
-            feature_cols = ['bridge','tunnel','oneway']
+            # feature_cols = ['bridge','tunnel','oneway'] cd
+            feature_cols = ['length', 'oneway'] # porto
 
         self.data_root = data_root
         self.args = args
@@ -470,7 +415,7 @@ class TRACKDataset(Dataset):
         self.cache_dir = cache_dir
         self.force_recompute = force_recompute
         self.khop_fallback = khop_fallback
-        self.min_flow_count = int(min_flow_count)
+        self.min_flow_count = int(self.args.min_flow_count)
 
         # 1) 初始 vocab
         vocab_cache = os.path.join(cache_dir, f"{os.path.basename(self.traj_file)}_segment_vocab.pkl")
@@ -490,7 +435,7 @@ class TRACKDataset(Dataset):
             self.T_total, _, _ = self.traffic_ts.shape
         else:
             print(f"[Dataset] traffic_ts_file {traffic_ts_file} not found, will convert from traj_file")
-            self.traffic_ts = convert_traj2flow(self.traj_file, len(self.idx2seg), idx2seg=self.idx2seg) #TODO: flow normalize
+            self.traffic_ts = convert_traj2flow(self.traj_file, len(self.idx2seg), idx2seg=self.idx2seg,bin_minutes=self.args.time_interval) #TODO: flow normalize
             self.T_total, _, _ = self.traffic_ts.shape
 
         # 2.5) 低频过滤 -> UNK（仅当 min_flow_count > 0）
@@ -564,18 +509,52 @@ class TRACKDataset(Dataset):
             traj_col = 'traj_id'
 
             out_rows = []
+            total_rows = len(traj_df)
+            if total_rows == 0:
+                raise ValueError("traj_df is empty.")
+
+            print(f"[Points] Start parsing traj_df, total rows: {total_rows}")
+            start_time = time.time()
+
+            report_every = 50000  # 每多少行打印一次进度，可以按数据规模调
+
             for ridx, row in traj_df.iterrows():
+                # 进度统计
+                if (ridx + 1) % report_every == 0 or (ridx + 1) == total_rows:
+                    frac = (ridx + 1) / total_rows
+                    elapsed = time.time() - start_time
+                    if frac > 0:
+                        est_total = elapsed / frac
+                        remaining = est_total - elapsed
+                    else:
+                        remaining = 0.0
+
+                    print(
+                        f"[Points] {frac*100:5.1f}% "
+                        f"({ridx+1:,}/{total_rows:,})  "
+                        f"elapsed: {elapsed/60.0:6.2f} min  "
+                        f"ETA: {remaining/60.0:6.2f} min"
+                    )
+
                 points_field = row.get(points_col)
                 if pd.isna(points_field):
                     continue
+
                 try:
                     pts = parse_points_from_field(points_field)
                 except Exception as e:
                     print(f"Warning: cannot parse points in CSV row {ridx}: {e}", file=sys.stderr)
                     continue
+
                 traj_id = str(row.get(traj_col, ridx))
                 for (road_id, ts) in pts:
                     out_rows.append((traj_id, int(ts), road_id))
+
+            elapsed_total = time.time() - start_time
+            print(
+                f"[Points] DONE. Parsed {total_rows:,} rows, "
+                f"time: {elapsed_total/60.0:.2f} min"
+            )
 
             out_rows.sort(key=lambda x: (x[0], x[1]))
 

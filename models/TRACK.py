@@ -63,7 +63,17 @@ class TrafficTransformer(nn.Module):
             x = x + X_G.unsqueeze(1).expand(B, T, N, -1)  # B x T x N x d
         # per-node transformer: N x T x d
         x_seq = x.permute(0, 2, 1, 3).contiguous().view(B*N, T, -1)
-        out = self.trans(x_seq)  # N x T x d
+        
+        #TODO:把chunk继承一下
+        #B*N过大会导致cuda内核报错，因此要分块加载 2025/11/19
+        chunk = 4096  # 可以试 2048/4096/8192，看显存和速度
+        outs = []
+        for s in range(0, x_seq.size(0), chunk):
+            e = min(s + chunk, x_seq.size(0))
+            outs.append(self.trans(x_seq[s:e]))  # 每次只对一部分节点做注意力
+        out = torch.cat(outs, dim=0)      
+        
+        # out = self.trans(x_seq)  # N x T x d
         last = out[:, -1, :].view(B, N, -1)              # 取最后时刻的输出 B x N x d
         return self.out(last)  # B x N x d
 
@@ -103,8 +113,8 @@ class Model(nn.Module):
         self.traj_trans = TrajectoryTransformer(args)
         self.coatt_blocks = nn.ModuleList([CoAttLayer(args) for _ in range(getattr(args, 'n_coatt_layers', 2))])
         self.state_head = nn.Linear(args.d_model, getattr(args, 'pre_steps', 1))
-        if self.args.load_pretrained and os.path.exists('checkpoints/TRACK_pretrain_test_TRACK_TRACK_lr_0.001_ba_16_epo_50_itr_0/checkpoint.pth'):
-            self.load_state_dict(torch.load('checkpoints/TRACK_pretrain_test_TRACK_TRACK_lr_0.001_ba_16_epo_50_itr_0/checkpoint.pth', 
+        if self.args.load_pretrained and os.path.exists('checkpoints/TRACK_pretrain_test_TRACK_TRACK_lr_0.001_ba_32_epo_50_itr_0/checkpoint.pth'):
+            self.load_state_dict(torch.load('checkpoints/TRACK_pretrain_test_TRACK_TRACK_lr_0.001_ba_32_epo_50_itr_0/checkpoint.pth', 
                                             map_location=self.args.device))
             print("Loaded pretrained.pth")
 

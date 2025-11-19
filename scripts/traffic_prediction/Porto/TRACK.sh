@@ -3,12 +3,12 @@ model_name=TRACK
 python -u run.py \
   --task_name TrafficPrediction \
   --is_training 1 \
-  --root_path data/sf_data/raw \
+  --root_path data/Porto/match_jll \
   --model $model_name \
   --data TRACK \
-  --NumofRoads 7239 \
+  --NumofRoads 2977 \
   --learning_rate 0.001 \
-  --batch_size 4 \
+  --batch_size 32 \
   --lr_scheduler 'cosine' \
   --lr_istorch \
   --learner 'adamw' \
@@ -20,4 +20,6 @@ python -u run.py \
   --patience 10 \
   --pre_steps 1 \
   --load_pretrained \
-  --min_flow_count 100 \
+  --min_flow_count 10000 \
+  --time_interval 120 \
+  --static_feat_dim 2 

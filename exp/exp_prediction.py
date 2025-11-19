@@ -206,11 +206,11 @@ class ExpPrediction(Exp_Basic):
         self.model.load_state_dict(torch.load(best_model_path))
         return self.model
         
-    def test(self, setting, test=0):#TODO:MDTP的denormalize
+    def test(self, setting, test=0):
         test_data, test_loader = self._get_data(flag='test')
         if test:
             print('loading model')
-            self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
+            self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'),map_location=self.args.device))
 
         folder_path = './test_results/' + setting + '/'
         if not os.path.exists(folder_path):
