@@ -1,38 +1,33 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+import argparse
 import os
+import ast
+import random
+from collections import defaultdict
+from typing import List, Dict, Tuple
+import geopandas as gpd
 import numpy as np
 import pandas as pd
-import glob, random
-import re
 import torch
-import pickle as pkl
-from typing import List, Tuple
-from torch.utils.data import Dataset, DataLoader
-from torch.nn.utils.rnn import pad_sequence
-from collections import defaultdict
-from sklearn.preprocessing import StandardScaler
-from datetime import datetime as dt
-from datetime import date, timedelta
-from utils.tools import date_range, to_sparse_tensor
-import warnings
+from torch.utils.data import Dataset
+from utils.traj2flow import convert_traj2flow
+from utils.build_seg import build_full_segment_vocab_from_trajs_and_edge
+from utils.Adjacency import build_full_edges_from_shp_using_vocab
 
-warnings.filterwarnings('ignore')
+# =============================== PREFIX FOREST ==================================
 
-# SF20_forTrajnet_Dataset
 class TrieNode:
-    """
-    前缀树节点，用于批内前缀共享计算（可选）
-    """
     def __init__(self):
-        self.children = {}
-        self.is_end = False
+        self.children: Dict[int, "TrieNode"] = {}
+        self.is_end: bool = False
 
-def build_prefix_forest(truncated_paths):
-    """
-    根据截断后子轨迹构建前缀森林
-    返回根节点列表（仅在需要前缀优化时使用）
-    """
-    forest = {}
+
+def build_prefix_forest(truncated_paths: List[List[int]]) -> List[TrieNode]:
+    forest: Dict[int, TrieNode] = {}
     for path in truncated_paths:
+        if not path:
+            continue
         root = forest.setdefault(path[0], TrieNode())
         node = root
         for seg in path:
@@ -40,388 +35,462 @@ def build_prefix_forest(truncated_paths):
         node.is_end = True
     return list(forest.values())
 
-class SF20_forTrajnet_Dataset(Dataset):
-    def __init__(self, args, flag, root_path,flow_path='sf_flow_100_trimmed.csv',
-                 traj_path='raw_last_sf_100_win7_trimmed.csv',
-                 trunc_length=7, samples_per_segment=5, batch_size=32):
-        self.trunc_length = trunc_length
-        self.samples_per_segment = samples_per_segment
-        self.batch_size = batch_size
-        self.trunc_length = trunc_length
-        self.samples_per_segment = samples_per_segment
-        self.root_path = root_path
 
-        # 构建 segment->轨迹映射
-        self.seg2trajs = defaultdict(list)
-        trajectories = pd.read_csv(os.path.join(self.root_path, traj_path), header=None).values.tolist()
+# =============================== 轨迹滑动窗口 ==================================
 
-        assert flag in ['train', 'val', 'test']
-        N_len = len(trajectories)
-        train_n = int(N_len * 0.7)
-        val_n   = int(N_len * 0.1)
-        test_n  = N_len - train_n - val_n
-        segments = [('train', train_n),
-                    ('val',   val_n),
-                    ('test',  test_n)]
-        idx_map = {}
-        start = 0
-        for name, length in segments:
-            idx_map[name] = list(range(start, start + length))
-            start += length
-        trajectories = [trajectories[i] for i in idx_map[flag]]  # 按照flag划分数据集
+def build_seg2frags_with_sliding_window(
+    remapped_trajs: List[List[int]],
+    trunc_length: int,
+) -> Dict[int, List[List[int]]]:
+    """
+    按 TrajNet 原文，用滑动窗口从轨迹中抽取长度为 trunc_length 的子轨迹，
+    并按「末端 segment」分桶。
+    """
+    seg2frags: Dict[int, List[List[int]]] = defaultdict(list)
 
-        for traj in trajectories:
-            self.seg2trajs[traj[-1]].append(traj)
-        self.segments = [seg for seg, lst in self.seg2trajs.items() if lst]
+    for traj in remapped_trajs:
+        L = len(traj)
+        if L < trunc_length:
+            continue
+        for i in range(L - trunc_length + 1):
+            frag = traj[i:i + trunc_length]
+            end_seg = frag[-1]
+            seg2frags[end_seg].append(frag)
 
-        # 加载并过滤 flow 数据
-        flow = pd.read_csv(os.path.join(self.root_path, flow_path), header=0)
-        flow['index'] = pd.to_datetime(flow['index'])
-        self.flow = flow
+    return seg2frags
 
-        self.on_epoch_start()  # 预生成样本
 
-    def load_flow_data(self, T, T1=6, T2=2, T3=2):
-        """
-        和 Model 里的版本一致，只不过直接用 self.flow
-        """
-        flow = self.flow
-        recent = flow[
-            (flow['index'] >= T - pd.Timedelta(minutes=T1 * 10)) &
-            (flow['index'] < T)
-        ]
-        
-        daily = flow[
-            (flow['index'] >= T - pd.Timedelta(days=T2) - pd.Timedelta(minutes=T1 * 10)) &
-            (flow['index'] < T - pd.Timedelta(days=T2))
-        ]
-        T2 -= 1
-        while T2 > 0:
-            daily_part = flow[
-                (flow['index'] >= T - pd.Timedelta(days=T2) - pd.Timedelta(minutes=T1 * 10)) &
-                (flow['index'] < T - pd.Timedelta(days=T2))
-            ]
-            daily = pd.concat([daily, daily_part], ignore_index=True)
-            T2 -= 1
+# =============================== flow 裁剪，不加 UNK ==================================
 
-        weekly = flow[
-            (flow['index'] >= T - pd.Timedelta(weeks=T3) - pd.Timedelta(minutes=T1 * 10)) &
-            (flow['index'] < T - pd.Timedelta(weeks=T3))
-        ]
-        T3 -= 1
-        while T3 > 0:
-            weekly_part = flow[
-                (flow['index'] >= T - pd.Timedelta(weeks=T3) - pd.Timedelta(minutes=T1 * 10)) &
-                (flow['index'] < T - pd.Timedelta(weeks=T3))
-            ]
-            weekly = pd.concat([weekly, weekly_part], ignore_index=True)
-            T3 -= 1
+def apply_min_flow_filter(
+    traffic_ts: np.ndarray,  # [T, N, C_state]
+    min_flow_count: float,
+) -> Tuple[np.ndarray, Dict[int, int], Dict[int, int], List[int]]:
+    """
+    根据列上的总流量做 min_flow_count 过滤，不引入 UNK。
+    """
+    T, N, C = traffic_ts.shape
+    col_sum = traffic_ts.sum(axis=(0, 2))  # [N,]
 
-        # 去掉 datetime 列
-        value_cols = [col for col in flow.columns if flow[col].dtype != 'datetime64[ns]']
-        recent = torch.from_numpy(recent[value_cols].values.astype(np.float32)).T
-        daily  = torch.from_numpy(daily[value_cols].values.astype(np.float32)).T
-        weekly = torch.from_numpy(weekly[value_cols].values.astype(np.float32)).T
+    if min_flow_count > 0:
+        keep_idx = [i for i in range(N) if col_sum[i] >= min_flow_count]
+    else:
+        keep_idx = list(range(N))
 
-        return recent, daily, weekly
+    if len(keep_idx) == 0:
+        raise ValueError(f"[apply_min_flow_filter] 所有 segment 的总流量都 < {min_flow_count}")
 
-    def __len__(self):
-        return len(self.samples)
+    traffic_ts_new = traffic_ts[:, keep_idx, :]  # [T, N_keep, C]
+    old2new = {old: new for new, old in enumerate(keep_idx)}
+    new2old = {new: old for old, new in old2new.items()}
+    return traffic_ts_new, old2new, new2old, keep_idx
 
-    def __getitem__(self, idx):
-        return self.samples[idx]
-    
-    def on_epoch_start(self):
-        # 预生成样本
-        self.samples = []
-        for seg in self.segments:
-            candidates = self.seg2trajs[seg]
-            # 采样或重复采样
-            if len(candidates) >= self.samples_per_segment:
-                chosen = random.sample(candidates, self.samples_per_segment)
-            else:
-                chosen = candidates
 
-            flow_values = torch.tensor(self.flow[str(seg)].values, dtype=torch.float)
-            for traj in chosen:
-                raw_paths = traj
-                tensor_paths = torch.tensor(traj, dtype=torch.long)
-                self.samples.append((seg, raw_paths, tensor_paths, flow_values))
-   
-    def collate_fn(self, batch):
-        """
-        将多组(sample)合并成一个mini-batch：
-        - 构建前缀森林
-        - paths pad到同一长度
-        - 按 segment 聚合目标 flow 向量
-        """
-        segments, raw_paths, tensor_paths, targets = zip(*batch)
+# =============================== 构造 t_list（使用 stride） ===============================
 
-        # 构建前缀森林
-        forest = build_prefix_forest(raw_paths)
+def build_time_index_list(
+    T_total: int,
+    tau_p: int,
+    tau_d: int,
+    tau_w: int,
+    time_interval: int,
+    t_stride: int,
+) -> List[int]:
+    """
+    构造合法的中心时间索引 t_list，并用 stride 下采样。
+    """
+    steps_hour = 60 // time_interval
+    steps_day = 24 * steps_hour
+    steps_week = 7 * steps_day
 
-        # pad tensor_paths
-        padded = pad_sequence(list(tensor_paths), batch_first=True, padding_value=0)
+    lookback = tau_p + tau_d * steps_day + tau_w * steps_week
+    min_t = lookback
+    max_t = T_total - tau_p
 
-        segments_tensor = torch.tensor(segments, dtype=torch.long)
+    if max_t <= min_t:
+        raise ValueError(f"[build_time_index_list] T_total={T_total} 太短")
 
-        # 聚合 targets: 按 segment 聚合（平均）
-        segment2targets = defaultdict(list)
-        for seg, target in zip(segments, targets):
-            segment2targets[seg].append(target)
+    t_list = list(range(min_t, max_t, t_stride))
+    return t_list
 
-        # 最终的 targets 要按照 forward() 输出顺序一致：去重后保序
-        unique_segments = list(dict.fromkeys(segments))  # 去重且保持顺序
-        targets = []
-        T_start = random.randint(0, 59)  # 随机起始点
-        for t in range(T_start, 1424, 60): # 每60分钟一个时间段,1424为总共时间段数
-            aggregated_targets = []
-            for seg in unique_segments:
-                t_list = segment2targets[seg][0]
-                aggregated_targets.append(t_list[t:t+6])
-            targets.append(torch.stack(aggregated_targets, dim=0))
-        targets_tensor = torch.stack(targets, dim=0)  
 
-        T_start_time = str(pd.to_datetime('2008-05-31 04:00', format='%Y-%m-%d %H:%M') + pd.Timedelta(minutes=T_start * 10))
-        timerange = pd.date_range(T_start_time, '2008-06-10 01:10', freq='600min')
+# =============================== 主 Dataset (方案 B + 邻接矩阵) ===============================
 
-        recents, dailys, weeklys = [], [], []
-        for t in timerange:
-            recent, daily, weekly = self.load_flow_data(T=t)
-            recents.append(recent.unsqueeze(1))
-            dailys.append(daily.unsqueeze(1))
-            weeklys.append(weekly.unsqueeze(1))
+class Trajnet_Dataset(Dataset):
+    """
+    方案 B：对每个时间 t，一次性为所有 segment 采样子轨迹，并构建前缀森林。
 
-        recents  = torch.stack(recents, dim=0)   # [time, N, 1, T*]
-        dailys   = torch.stack(dailys, dim=0)
-        weeklys  = torch.stack(weeklys, dim=0)
+    - traffic_ts: [T, N_seg, C_state] 由 convert_traj2flow 生成（和 TRACK 一致）
+    - flow_scalar: [T, N_seg] 用于 temporal encoder & target
+    - seg2frags: seg -> list of length-ℓ fragments（滑动窗口）
+    - adj_mask: [N_seg, N_seg] bool，相邻为 True，下游 SpatialAttention 直接用
 
-        inputs = {
-            'segments': segments_tensor,
-            'paths': padded,
-            'forest': forest,
-            'recent': recents,
-            'daily': dailys,
-            'weekly': weeklys
+    __getitem__ 返回：
+        {
+          "t": t,
+          "raw_paths": 所有 fragment 的列表 (List[List[int]]),
+          "tensor_paths": 对应的 tensor 列表,
+          "recent":  [N_seg, 1, T1],
+          "daily":   [N_seg, 1, T2*T1],
+          "weekly":  [N_seg, 1, T3*T1],
+          "future_flow": [N_seg, T1]  作为全路网的 ground truth
         }
-        return inputs, targets_tensor
 
-class DiDi_forTrajnet_Dataset(Dataset):
-    def __init__(self, args, flag, root_path,flow_path='merged.csv',
-                 traj_path='final_traj_dataset.csv',
-                 trunc_length=7, samples_per_segment=5, batch_size=32):
+    collate_fn (建议 batch_size=1):
+        inputs = {
+           "forest": forest,
+           "paths":  paths_padded,
+           "recent": recents,      # [B, N_seg, 1, T1]
+           "daily":  dailys,
+           "weekly": weeklys,
+        }
+        targets = future_flow      # [B, N_seg, T1]
+    """
+
+    def __init__(
+        self,
+        args,
+        flag: str,
+        traffic_ts_file: str = 'flow_10min.npy',
+        roadid_col: str = "fid",
+        trunc_length: int = 7,
+        samples_per_segment: int = 5,
+        force_recompute: bool = False,
+    ):
+        super().__init__()
+        assert flag in ["train", "val", "test"]
+        self.flag = flag
+        self.root_path = args.root_path
+        self.road_shp_file = os.path.join(self.root_path, args.shp_file)
+        self.traj_file = os.path.join(self.root_path, args.traj_file)        
+        self.time_interval = int(getattr(args, "time_interval", 10))
+        self.traffic_ts_file = os.path.join(self.root_path, f"flow_{self.time_interval}min.npy")
+        self.roadid_col = roadid_col
+        self.min_flow_count = args.min_flow_count
+
+        os.makedirs(args.cache_dir, exist_ok=True)
+        self.cache_dir = args.cache_dir
+        self.force_recompute = force_recompute
+
         self.trunc_length = trunc_length
         self.samples_per_segment = samples_per_segment
-        self.batch_size = batch_size
-        self.trunc_length = trunc_length
-        self.samples_per_segment = samples_per_segment
-        self.root_path = root_path
-        self.args = args
+        self.t_stride = args.tstride
 
-        # 构建 segment->轨迹映射
-        self.seg2trajs = defaultdict(list)
-        trajectories = pd.read_csv(os.path.join(self.root_path, traj_path), header=None,  quotechar='"', skipinitialspace=True).values.tolist()
+        # TrajNet 超参 (T1/T2/T3)
+        self.tau_p = int(args.T1)  # 预测步数 & recent 长度
+        self.tau_d = int(args.T2)
+        self.tau_w = int(args.T3)
 
-        assert flag in ['train', 'val', 'test']
-        N_len = len(trajectories)
-        train_n = int(N_len * 0.7)
-        val_n   = int(N_len * 0.1)
-        test_n  = N_len - train_n - val_n
-        segments = [('train', train_n),
-                    ('val',   val_n),
-                    ('test',  test_n)]
-        idx_map = {}
-        start = 0
-        for name, length in segments:
-            idx_map[name] = list(range(start, start + length))
-            start += length
-        trajectories = [trajectories[i] for i in idx_map[flag]]  # 按照flag划分数据集
 
-        for traj in trajectories:
-            # Fix: Handle different trajectory formats
-            if isinstance(traj, list):
-                if len(traj) > 0:
-                    segment_id = traj[-1]  # Last element is segment ID
-                    self.seg2trajs[segment_id].append(traj)
-            else:
-                print(f"Warning: Unexpected trajectory format: {type(traj)}")
+        # ========== 1) 从 shp 构建初始 vocab（完全复用 TRACK 的逻辑） ==========
+        vocab_cache = os.path.join(
+            self.cache_dir,
+            f"{os.path.basename(self.traj_file)}_{args.model}_segment_vocab.pkl"
+        )
 
-        self.segments = [seg for seg, lst in self.seg2trajs.items() if lst]
+        if os.path.exists(vocab_cache) and not self.force_recompute:
+            import pickle as pkl
+            with open(vocab_cache, "rb") as fh:
+                tmp = pkl.load(fh)
+                self.seg2idx = tmp["seg2idx"]   # road_id -> idx
+                self.idx2seg = tmp["idx2seg"]   # idx -> road_id
+        else:
+            self.seg2idx, self.idx2seg = build_full_segment_vocab_from_trajs_and_edge(
+                self.road_shp_file,
+                roadid_col=self.roadid_col,
+                out_vocab_file=vocab_cache,
+            )
 
-        # 加载并过滤 flow 数据
-        flow = pd.read_csv(os.path.join(self.root_path, flow_path), header=0)
-        flow['time_bin'] = pd.to_datetime(flow['time_bin'])
-        self.flow = flow
+        # ========== 2) traffic_ts：与 TRACK 一样用 convert_traj2flow ==========
+        # traffic_ts: [T, N_full, C_state]
+        if self.traffic_ts_file is not None and os.path.exists(self.traffic_ts_file):
+            self.traffic_ts = np.load(self.traffic_ts_file)
+        else:
+            print(f"[Data_forTrajnet] traffic_ts_file {self.traffic_ts_file} 不存在，使用 convert_traj2flow 从 {self.traj_file} 生成")
+            self.traffic_ts = convert_traj2flow(
+                self.traj_file,
+                len(self.idx2seg),
+                idx2seg=self.idx2seg,
+                bin_minutes=self.time_interval,
+            )
+            if traffic_ts_file is not None:
+                np.save(traffic_ts_file, self.traffic_ts)
 
-        self.on_epoch_start()  # 预生成样本
+        self.T_total, N_full, C_state = self.traffic_ts.shape
 
-    def load_flow_data(self, T, T1=6, T2=2, T3=2):
-        """
-        和 Model 里的版本一致，只不过直接用 self.flow
-        """
-        flow = self.flow
-        recent = flow[
-            (flow['time_bin'] >= T - pd.Timedelta(minutes=T1 * 10)) &
-            (flow['time_bin'] < T)
-        ]
-        
-        daily = flow[
-            (flow['time_bin'] >= T - pd.Timedelta(days=T2) - pd.Timedelta(minutes=T1 * 10)) &
-            (flow['time_bin'] < T - pd.Timedelta(days=T2))
-        ]
-        T2 -= 1
-        while T2 > 0:
-            daily_part = flow[
-                (flow['time_bin'] >= T - pd.Timedelta(days=T2) - pd.Timedelta(minutes=T1 * 10)) &
-                (flow['time_bin'] < T - pd.Timedelta(days=T2))
-            ]
-            daily = pd.concat([daily, daily_part], ignore_index=True)
-            T2 -= 1
+        # ========== 3) 按 min_flow_count 裁剪（不加 UNK） ==========
+        self.traffic_ts, self.old2new, self.new2old, keep_idx = apply_min_flow_filter(
+            self.traffic_ts,
+            self.min_flow_count,
+        )
+        self.T_total, self.N_seg, self.C_state = self.traffic_ts.shape
+        # idx2seg 只保留被选中的 segment id（road_id）
+        self.idx2seg = [self.idx2seg[i] for i in keep_idx]
 
-        weekly = flow[
-            (flow['time_bin'] >= T - pd.Timedelta(weeks=T3) - pd.Timedelta(minutes=T1 * 10)) &
-            (flow['time_bin'] < T - pd.Timedelta(weeks=T3))
-        ]
-        T3 -= 1
-        while T3 > 0:
-            weekly_part = flow[
-                (flow['time_bin'] >= T - pd.Timedelta(weeks=T3) - pd.Timedelta(minutes=T1 * 10)) &
-                (flow['time_bin'] < T - pd.Timedelta(weeks=T3))
-            ]
-            weekly = pd.concat([weekly, weekly_part], ignore_index=True)
-            T3 -= 1
+        print(f"[Data_forTrajnet] traffic_ts 裁剪后: T={self.T_total}, N_seg={self.N_seg}, C_state={self.C_state}")
 
-        # 去掉 datetime 列
-        value_cols = [col for col in flow.columns if flow[col].dtype != 'datetime64[ns]']
-        recent = torch.from_numpy(recent[value_cols].values.astype(np.float32)).T
-        daily  = torch.from_numpy(daily[value_cols].values.astype(np.float32)).T
-        weekly = torch.from_numpy(weekly[value_cols].values.astype(np.float32)).T
+        # 单通道 flow（可以选用你想要的 channel，这里默认第0维）
+        self.flow_scalar = self.traffic_ts[:, :, 0]  # [T, N_seg]
 
-        return recent, daily, weekly
+        # ========== 4) 构造裁剪后的 seg2idx，用于路网构建 ==========
+        self.seg2idx_filtered = {rid: i for i, rid in enumerate(self.idx2seg)}
 
-    def __len__(self):
-        return len(self.samples)
+        # ========== 5) 基于 shp + filtered vocab 构建邻接矩阵 ==========
 
-    def __getitem__(self, idx):
-        return self.samples[idx]
-    
-    def on_epoch_start(self):
-        # 预生成样本
-        self.samples = []
-        for seg in self.segments:
-            candidates = self.seg2trajs[seg]
-            # 采样或重复采样
-            if len(candidates) >= self.samples_per_segment:
-                chosen = random.sample(candidates, self.samples_per_segment)
-            else:
-                chosen = candidates
+        edge_index, info = build_full_edges_from_shp_using_vocab(
+            self.road_shp_file,
+            self.seg2idx_filtered,
+            roadid_col=self.roadid_col,
+            from_col="u",    # 按你的 shp 字段名改
+            to_col="v",
+            assume_uv_present=True,
+            coord_round=60,
+            verbose=True,
+            skip_missing=True,
+        )
+        edge_index = edge_index.long()
+        src, dst = edge_index[0], edge_index[1]
 
-            # 修复：确保flow数据访问正确，处理segment ID中的特殊字符
-            try:
-                # 清理segment ID，去除可能的引号和空白字符
-                clean_seg = str(seg).strip().strip('"').strip("'")
-                
-                if clean_seg in self.flow.columns:
-                    flow_values = torch.tensor(self.flow[clean_seg].values, dtype=torch.float)
-                elif str(seg) in self.flow.columns:
-                    flow_values = torch.tensor(self.flow[str(seg)].values, dtype=torch.float)
-                else:
-                    # 如果segment列不存在，尝试查找相似的列名
-                    available_cols = [col for col in self.flow.columns if str(seg) in str(col) or clean_seg in str(col)]
-                    if available_cols:
-                        print(f"使用相似的列: {available_cols[0]} 替代 {seg}")
-                        flow_values = torch.tensor(self.flow[available_cols[0]].values, dtype=torch.float)
-                    else:
-                        print(f"警告：在flow数据中未找到segment {seg} (清理后: {clean_seg})")
-                        print(f"可用的列: {list(self.flow.columns)[:10]}...")  # 显示前10个列名
-                        flow_values = torch.zeros(len(self.flow), dtype=torch.float)
-            except Exception as e:
-                print(f"为segment {seg}加载flow数据时出错: {e}")
-                flow_values = torch.zeros(100, dtype=torch.float)  # 虚拟值
+        adj = torch.zeros(self.N_seg, self.N_seg, dtype=torch.bool)
+        adj[src, dst] = True
+        adj[dst, src] = True
+        self.adj_mask = adj    # 下游直接用 dataset.adj_mask
+        with open(os.path.join(self.cache_dir, f"adjacency_{self.min_flow_count}_{args.data}.pkl"), "wb") as f:
+            import pickle as pkl
+            pkl.dump(self.adj_mask, f)
+            
+        # ========== 6) 读取轨迹并 remap 到「裁剪后」seg idx，带缓存 ==========
+        traj_df = None
 
-            for traj in chosen:
-                raw_paths = traj
-                # 修复：确保轨迹数据在张量转换前格式正确
+        cache_remap_path = os.path.join(
+            self.cache_dir,
+            f"remapped_trajs_minflow{self.min_flow_count}_Nseg{self.N_seg}_{args.data}.pkl"
+        )
+
+        if os.path.exists(cache_remap_path) and (not self.force_recompute):
+            print(f"[Data_forTrajnet] 加载 remapped_trajs 缓存: {cache_remap_path}")
+            import pickle as pkl
+            with open(cache_remap_path, "rb") as f:
+                remapped_trajs = pkl.load(f)
+
+        else:
+            print(f"[Data_forTrajnet] 未发现缓存 → 读取原始轨迹 CSV 并重新构建 remapped_trajs")
+            print(f"            CSV 路径 = {self.traj_file}")
+            traj_df = pd.read_csv(self.traj_file, header=None)
+
+            remapped_trajs: List[List[int]] = []
+
+            for _, row in traj_df.iterrows():
+                # row: driver_id, traj_id, offsets, segment sequence
+                seq_raw = row[3]
                 try:
-                    # 确保traj是整数列表
-                    if isinstance(traj, list):
-                        # 将任何字符串元素转换为整数
-                        clean_traj = []
-                        for item in traj:
-                            if isinstance(item, str):
-                                item = item.strip().strip('"').strip("'")
-                                try:
-                                    clean_traj.append(int(item))
-                                except ValueError:
-                                    print(f"警告：无法将 '{item}' 转换为整数")
-                                    continue
-                            else:
-                                clean_traj.append(int(item))
-                        tensor_paths = torch.tensor(clean_traj, dtype=torch.long)
-                    else:
-                        print(f"警告：意外的轨迹类型: {type(traj)}")
-                        continue
-                        
-                except Exception as e:
-                    print(f"将轨迹转换为张量时出错: {e}")
-                    print(f"轨迹数据: {traj}")
+                    items = ast.literal_eval(seq_raw)
+                except Exception:
                     continue
-                self.samples.append((seg, raw_paths, tensor_paths, flow_values))
-   
+
+                mapped = []
+                for item in items:
+                    # item: [seg_id, ts, speed, duration]
+                    try:
+                        road_id = int(item[0])
+                    except Exception:
+                        continue
+
+                    if road_id not in self.seg2idx:
+                        continue
+                    old_idx = self.seg2idx[road_id]
+                    if old_idx not in self.old2new:
+                        continue
+                    new_idx = self.old2new[old_idx]
+                    mapped.append(new_idx)
+
+                if mapped:
+                    remapped_trajs.append(mapped)
+
+            if len(remapped_trajs) == 0:
+                raise ValueError(
+                    "[Data_forTrajnet] remapped_trajs 为空，"
+                    "请检查 min_flow_count 是否过高 或轨迹文件格式是否正确。"
+                )
+
+            # ---- 保存缓存 ----
+            import pickle as pkl
+            with open(cache_remap_path, "wb") as f:
+                pkl.dump(remapped_trajs, f)
+            print(f"[Data_forTrajnet] remapped_trajs 已缓存到: {cache_remap_path}")
+
+        # ========== 7) 滑动窗口构造 seg2frags ==========
+        self.seg2frags = build_seg2frags_with_sliding_window(
+            remapped_trajs,
+            self.trunc_length,
+        )
+        self.valid_segments = [seg for seg, frags in self.seg2frags.items() if frags]
+        if len(self.valid_segments) == 0:
+            raise ValueError("[Data_forTrajnet] seg2frags 为空，检查 trunc_length 或 min_flow_count")
+
+        print(f"[Data_forTrajnet] 有有效子轨迹的 segment 数: {len(self.valid_segments)}")
+
+        # ========== 8) 使用 stride 构建 t_list，并划分 train/val/test ==========
+        all_t = build_time_index_list(
+            T_total=self.T_total,
+            tau_p=self.tau_p,
+            tau_d=self.tau_d,
+            tau_w=self.tau_w,
+            time_interval=self.time_interval,
+            t_stride=self.t_stride,
+        )
+        total_len = len(all_t)
+        train_n = int(0.7 * total_len)
+        val_n = int(0.1 * total_len)
+
+        if flag == "train":
+            self.t_list = all_t[:train_n]
+        elif flag == "val":
+            self.t_list = all_t[train_n: train_n + val_n]
+        else:
+            self.t_list = all_t[train_n + val_n:]
+
+        print(f"[Data_forTrajnet] flag={flag}, time samples={len(self.t_list)}")
+
+    # ===================== flow → recent/daily/weekly（对所有 N_seg） =====================
+
+    def _slice_flow_for_t(self, t: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        f = self.flow_scalar  # [T, N_seg]
+        steps_hour = 60 // self.time_interval
+        steps_day = 24 * steps_hour
+        steps_week = 7 * steps_day
+
+        # recent: [t-tau_p, t)
+        recent = torch.from_numpy(f[t - self.tau_p: t].T).unsqueeze(1).float()  # [N_seg, 1, tau_p]
+
+        # daily
+        daily_chunks = []
+        for d in range(1, self.tau_d + 1):
+            base = t - d * steps_day
+            daily_chunks.append(f[base - self.tau_p: base])
+        daily = torch.from_numpy(np.concatenate(daily_chunks, axis=0).T).unsqueeze(1).float()  # [N_seg, 1, tau_d*tau_p]
+
+        # weekly
+        weekly_chunks = []
+        for w in range(1, self.tau_w + 1):
+            base = t - w * steps_week
+            weekly_chunks.append(f[base - self.tau_p: base])
+        weekly = torch.from_numpy(np.concatenate(weekly_chunks, axis=0).T).unsqueeze(1).float()  # [N_seg, 1, tau_w*tau_p]
+
+        return recent, daily, weekly
+
+    # ===================== Dataset 接口 =====================
+
+    def __len__(self) -> int:
+        return len(self.t_list)
+
+    def __getitem__(self, idx: int):
+        """
+        方案 B：对一个时间 t，为所有 segment 采样若干条子轨迹，
+        返回全路网的 recent/daily/weekly 和 future_flow。
+        """
+        t = self.t_list[idx]
+
+        # 1) 为每个 segment 采样若干 fragment
+        all_raw_paths: List[List[int]] = []
+        all_tensor_paths: List[torch.Tensor] = []
+
+        for seg, frags in self.seg2frags.items():
+            if not frags:
+                continue
+            if len(frags) >= self.samples_per_segment:
+                chosen = random.sample(frags, self.samples_per_segment)
+            else:
+                chosen = frags
+            for frag in chosen:
+                all_raw_paths.append(frag)
+                all_tensor_paths.append(torch.tensor(frag, dtype=torch.long))
+
+        # 2) flow → recent/daily/weekly
+        recent, daily, weekly = self._slice_flow_for_t(t)
+
+        # 3) 整个路网的 future_flow，作为 ground truth 矩阵 [N_seg, tau_p]
+        future_flow = torch.from_numpy(self.flow_scalar[t: t + self.tau_p].T).float()  # [N_seg, tau_p]
+
+        return {
+            "t": t,
+            "raw_paths": all_raw_paths,
+            "tensor_paths": all_tensor_paths,
+            "recent": recent,          # [N_seg,1,T1]
+            "daily": daily,
+            "weekly": weekly,
+            "future_flow": future_flow # [N_seg,T1]
+        }
+
+    # ===================== collate_fn =====================
+
     def collate_fn(self, batch):
         """
-        将多组(sample)合并成一个mini-batch：
-        - 构建前缀森林
-        - paths pad到同一长度
-        - 按 segment 聚合目标 flow 向量
+        batch: List[dict]，每个 dict 是 __getitem__ 的返回：
+        {
+            "t": t,
+            "raw_paths": List[List[int]],
+            "tensor_paths": List[Tensor],
+            "recent": [N_seg,1,T1],
+            "daily":  [N_seg,1,T2*T1],
+            "weekly": [N_seg,1,T3*T1],
+            "future_flow": [N_seg,T1]
+        }
+
+        返回:
+        inputs = {
+            "forest": List[List[TrieNode]]  长度 B
+            "recent": [B,N_seg,1,T1]
+            "daily":  [B,N_seg,1,T2*T1]
+            "weekly": [B,N_seg,1,T3*T1]
+        }
+        targets: [B,N_seg,T1]
         """
-        segments, raw_paths, tensor_paths, targets = zip(*batch)
+        B = len(batch)
 
-        # 构建前缀森林
-        forest = build_prefix_forest(raw_paths)
+        # 1) 每个样本一棵前缀森林
+        forests = []
+        for s in batch:
+            forest_i = build_prefix_forest(s["raw_paths"])
+            forests.append(forest_i)
 
-        # pad tensor_paths
-        padded = pad_sequence(list(tensor_paths), batch_first=True, padding_value=0)
+        # 2) temporal 输入
+        recents = torch.stack([s["recent"] for s in batch], dim=0)   # [B,N_seg,1,T1]
+        dailys  = torch.stack([s["daily"]  for s in batch], dim=0)   # [B,N_seg,1,T2*T1]
+        weeklys = torch.stack([s["weekly"] for s in batch], dim=0)   # [B,N_seg,1,T3*T1]
 
-        segments_tensor = torch.tensor(segments, dtype=torch.long)
-
-        # 聚合 targets: 按 segment 聚合（平均）
-        segment2targets = defaultdict(list)
-        for seg, target in zip(segments, targets):
-            segment2targets[seg].append(target)
-
-        # 最终的 targets 要按照 forward() 输出顺序一致：去重后保序
-        unique_segments = list(dict.fromkeys(segments))  # 去重且保持顺序
-        targets = []
-        T_start = random.randint(0, 49)  # 随机起始点
-        for t in range(T_start, 709, 50): # 每10分钟一个时间段,709为总共时间段数
-            aggregated_targets = []
-            for seg in unique_segments:
-                t_list = segment2targets[seg][0]
-                aggregated_targets.append(t_list[t:t+6])
-            targets.append(torch.stack(aggregated_targets, dim=0))
-        targets_tensor = torch.stack(targets, dim=0)  
-
-        T_start_time = str(pd.to_datetime('2016-11-03 01:00', format='%Y-%m-%d %H:%M') + pd.Timedelta(minutes=T_start * 10))
-        timerange = pd.date_range(T_start_time, '2016-11-07 23:00', freq='500min')
-
-        recents, dailys, weeklys = [], [], []
-        for t in timerange:
-            recent, daily, weekly = self.load_flow_data(T=t)
-            recents.append(recent.unsqueeze(1))
-            dailys.append(daily.unsqueeze(1))
-            weeklys.append(weekly.unsqueeze(1))
-
-        recents  = torch.stack(recents, dim=0)   # [time, N, 1, T*]
-        dailys   = torch.stack(dailys, dim=0)
-        weeklys  = torch.stack(weeklys, dim=0)
+        # 3) 全路网未来 flow 作为 target
+        targets = torch.stack([s["future_flow"] for s in batch], dim=0)  # [B,N_seg,T1]
 
         inputs = {
-            'segments': segments_tensor,
-            'paths': padded,
-            'forest': forest,
-            'recent': recents,
-            'daily': dailys,
-            'weekly': weeklys
+            "forest": forests,
+            "recent": recents,
+            "daily":  dailys,
+            "weekly": weeklys,
         }
-        return inputs, targets_tensor
+        return inputs, targets
+
+
+if __name__ == "__main__":
+    args = argparse.ArgumentParser()
+    # args.root_path = "data/GaiyaData/TRACK"
+    # args.shp_file = "roads_chengdu.shp"
+    # args.traj_file = "traj_converted.csv"
+    # args.cache_dir = "./cache"
+    # args.model = "Trajnet"
+    # args.tstride = 20
+    # args.data = "chengdu"
+    args.root_path = "data/Porto/match_jll"
+    args.shp_file = "map/edges.shp"
+    args.traj_file = "traj_porto.csv"
+    args.cache_dir = "./cache"
+    args.model = "Trajnet"
+    args.tstride = 300
+    args.min_flow_count = 25000
+    args.data = "porto"
+    args.T1 = 6
+    args.T2 = 2
+    args.T3 = 2
+    dataset = Trajnet_Dataset(
+        args,
+        flag="train")

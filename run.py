@@ -5,7 +5,8 @@ import torch.backends
 from exp.exp_prediction import ExpPrediction
 from exp.exp_trackpre import ExpTRACKPre
 from utils.print_args import print_args
-import random, wandb
+import random
+import wandb
 import numpy as np
 
 os.environ["WANDB_MODE"] = "offline"
@@ -33,14 +34,16 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoints', type=str, default='./checkpoints/', help='location of model checkpoints')
     parser.add_argument('--normalization', type=bool, default=True, help='whether to normalize the data')
     parser.add_argument('--log_dir', type=str, default='./logs/', help='location of log files')
+    parser.add_argument('--cache_dir', type=str, default='./cache/', help='location of cache files')
 
     # Prediction task
     parser.add_argument('--pre_steps', type=int, default=6, help='the predictions time steps')
     parser.add_argument('--seq_len', type=int, default=4, help='input sequence length')
     parser.add_argument('--NumofRoads', type=int, default=19621, help='number of nodes in the graph')
+    parser.add_argument('--shp_file', type=str, default=None, help='shapefile path for edge information')
     parser.add_argument('--traj_file', type=str, default=None, help='standard order traj file path')
-    parser.add_argument('--min_flow_count', type=int, default=100, help='minimum flow count for filtering')
     parser.add_argument('--time_interval', type=int, default=10, help='time interval for flow binning (minutes)')
+    parser.add_argument('--min_flow_count', type=int, default=1000, help='minimum flow count for filtering')
 
     # model define
     '''MDTP's args'''
@@ -57,12 +60,12 @@ if __name__ == '__main__':
     parser.add_argument('--T1', type=int, default=6, help='number of recent time steps')
     parser.add_argument('--T2', type=int, default=2, help='number of daily time steps')
     parser.add_argument('--T3', type=int, default=2, help='number of weekly time steps')
-    parser.add_argument('--n_s', type=int, default=5000, help='number of segments')
     parser.add_argument('--kernel_size', type=int, default=2, help='kernel size for convolution')
     parser.add_argument('--encoder_layers', type=int, default=3, help='number of layers in the model')
     parser.add_argument('--outChannel_1', type=int, default=16, help='output channel for the first convolution layer')
-    parser.add_argument('--adj', type=str, default='adjacency_trimmed.pkl')
-
+    parser.add_argument('--adj', type=str, default='adjacency_1000.pkl')
+    parser.add_argument('--tstride', type=int, default=15, help='temporal stride for segmenting time series')
+    
     '''TrGNN's args'''
     parser.add_argument('--demand_hop', type=int, default=75, help='GCN output feature size')
     parser.add_argument('--status_hop', type=int, default=3, help='GCN input feature size')
@@ -106,7 +109,7 @@ if __name__ == '__main__':
 
     # GPU
     parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')
-    parser.add_argument('--gpu', type=int, default=0, help='gpu')
+    parser.add_argument('--gpu', type=int, default=1, help='gpu')
     parser.add_argument('--gpu_type', type=str, default='cuda', help='gpu type')  # cuda or mps
     parser.add_argument('--use_multi_gpu', action='store_true', help='use multiple gpus', default=False)
     parser.add_argument('--devices', type=str, default='0,1', help='device ids of multiple gpus')

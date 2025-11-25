@@ -36,25 +36,37 @@ class SegmentEncoder(nn.Module):
                  tau_P=6, tau_D=2, tau_W=2,
                  kernel_size=2, encoder_layers=3):
         super().__init__()
-        # 三条时序分支
         self.branch = TemporalConvBranch(in_channels, C, kernel_size, encoder_layers)
 
     def forward(self, x_P, x_D, x_W):
         """
-        输入：
-          x_P: [n_s, 1, tau_P]  最近序列
-          x_D: [n_s, 1, tau_D * tau_P]  日周期序列
-          x_W: [n_s, 1, tau_W * tau_P]  周周期序列
+        batched 版本：
+          x_P: [B, N, 1, tau_P]
+          x_D: [B, N, 1, tau_D * tau_P]
+          x_W: [B, N, 1, tau_W * tau_P]
+
         返回：
-          enc: [n_s, C]
+          h: [B, N, C, n_h]  （n_h = 3 条分支的时间长度总和）
         """
-        f_P = self.branch(x_P)   # -> [n_s, C, *]
-        f_D = self.branch(x_D)   # -> [n_s, C, *]
-        f_W = self.branch(x_W)   # -> [n_s, C, *]
+        B, N, _, TP = x_P.shape
+        _, _, _, TD = x_D.shape
+        _, _, _, TW = x_W.shape
 
-        # 拼接并映射
-        h = torch.cat([f_P, f_D, f_W], dim = -1)  # [n_s, C, n_h]
+        # 展平 batch 和节点维度，做一次 conv
+        def encode_branch(x):
+            # x: [B,N,1,T] -> [B*N,1,T]
+            x = x.view(B * N, 1, x.size(-1))
+            f = self.branch(x)              # [B*N, C, T_out]
+            _, C, T_out = f.shape
+            f = f.view(B, N, C, T_out)      # [B,N,C,T_out]
+            return f, T_out
 
+        f_P, Lp = encode_branch(x_P)
+        f_D, Ld = encode_branch(x_D)
+        f_W, Lw = encode_branch(x_W)
+
+        # 沿时间维 concat -> [B,N,C,Lp+Ld+Lw] = [B,N,C,n_h]
+        h = torch.cat([f_P, f_D, f_W], dim=-1)
         return h
 
 class PropagatorWithForest(nn.Module):
@@ -72,16 +84,16 @@ class PropagatorWithForest(nn.Module):
     def forward(self, segment_feats, forest_roots, attn_matrix):
         """
         Args:
-          segment_feats: Tensor [n_s, n_h, C]
+          segment_feats: Tensor [NumofRoads, n_h, C]
           forest_roots:  List[TrieNode]
-          attn_matrix:   Tensor [n_s, n_s]
+          attn_matrix:   Tensor [NumofRoads, NumofRoads]
         Returns:
           segments: Tensor [M], 对应每个输出表征的segment id
           z_end:     Tensor [M, n_h, C], M = 不同末端segment数量
         """
-        n_s, n_h, C = segment_feats.shape
+        NumofRoads, n_h, C = segment_feats.shape
         D = self.D
-        feats_flat = segment_feats.reshape(n_s, D)
+        feats_flat = segment_feats.reshape(NumofRoads, D)
 
         # 累积每个末端segment的z_flat列表
         z_acc = defaultdict(list)
@@ -138,16 +150,15 @@ class Predictor(nn.Module):
 
 class Model(nn.Module):
     def __init__(self, args):
-        #T1, T2, T3, n_s, adj_mask, kernel_size=2, num_layers=3, outChannel_1=16
+        #T1, T2, T3, NumofRoads, adj_mask, kernel_size=2, num_layers=3, outChannel_1=16
         super().__init__()
         self.encoder    = SegmentEncoder(1, args.outChannel_1, args.T1, args.T2, args.T3, args.kernel_size, args.encoder_layers)
         self.n_h = args.T1 * (1 + args.T2 + args.T3)  
-        args.adj_mask = os.path.join(args.root_path, 'adjacency_trimmed.pkl')
-        self.attention = SpatialAttention(args.n_s, self.n_h, args.outChannel_1, args.adj_mask)  # [n_s, n_s]
+        args.adj_mask = os.path.join(args.cache_dir, f'adjacency_{args.min_flow_count}_{args.data}.pkl')
+        self.attention = SpatialAttention(args.NumofRoads, self.n_h, args.outChannel_1, args.adj_mask)  # [NumofRoads, NumofRoads]
         self.propagator = PropagatorWithForest(self.n_h, args.outChannel_1)
         self.predictor  = Predictor(pred_steps=args.T1)
         self.device = args.device
-        self.flow = os.path.join(args.root_path, 'sf_flow_100_trimmed.csv')
         self.__init_weights()  # 初始化权重
 
     def __init_weights(self):
@@ -165,22 +176,34 @@ class Model(nn.Module):
                     nn.init.constant_(m.bias, 0)
                     
     def forward(self, inputs):
-        # recent/daily/weekly: [N, 1, T*], trajectories: [B, num_trajs, traj_len]
-        forests = inputs['forest']
-        recents = inputs['recent'].to(self.device)   # [time, N, 1, T*]
-        dailys  = inputs['daily'].to(self.device)
-        weeklys = inputs['weekly'].to(self.device)
+        forests = inputs['forest']                     # List[List[TrieNode]], len=B
+        recents = inputs['recent'].to(self.device)     # [B,N,1,T1]
+        dailys  = inputs['daily'].to(self.device)      # [B,N,1,T2*T1]
+        weeklys = inputs['weekly'].to(self.device)     # [B,N,1,T3*T1]
 
-        prediction = []
-        for t in range(recents.shape[0]):  # 遍历 timerange
-            recent  = recents[t]
-            daily   = dailys[t]
-            weekly  = weeklys[t]
+        B, N, _, _ = recents.shape
 
-            features = self.encoder(recent, daily, weekly)  # [N, C, L]
-            A_matrix = self.attention(features)
-            segments, z_end = self.propagator(features, forests, A_matrix)
-            prediction.append(self.predictor(z_end))
+        # 1) temporal encoder: 真正 batched
+        features = self.encoder(recents, dailys, weeklys)  # [B,N,C,n_h]
 
-        prediction = torch.stack(prediction, dim=0)
-        return prediction
+        # 2) batched SpatialAttention: 得到 A_all: [B,N,N]
+        A_all = self.attention(features)                  # 我们刚改好的 batched 版本
+
+        preds_list = []
+        segments_list = []
+
+        # 3) 对每个样本独立用 prefix forest 做传播 & 预测
+        for i in range(B):
+            feat_i = features[i]       # [N,C,n_h]
+            A_i    = A_all[i]          # [N,N]
+            forest_i = forests[i]      # List[TrieNode]
+
+            segs_i, z_end_i = self.propagator(feat_i, forest_i, A_i)  # segs_i: [M_i]
+            preds_i = self.predictor(z_end_i)                         # [M_i,T1]
+
+            preds_list.append(preds_i)
+            segments_list.append(segs_i)
+        
+        
+
+        return (preds_list , segments_list)

@@ -62,16 +62,23 @@ def build_static_features_for_segments(idx2seg, raw_map, feature_cols, static_fi
     if not os.path.exists(raw_map):
         raise ValueError(f"raw_map file {raw_map} not found")
 
-    cols_to_keep = [roadid_col] + feature_cols
+    # 读完整 gdf，保留 geometry 用来算坐标
     gdf = gpd.read_file(raw_map)
+
+    if roadid_col is None:
+        raise ValueError("roadid_col must be specified")
+
+    cols_to_keep = [roadid_col] + feature_cols
     missing_cols = [c for c in cols_to_keep if c not in gdf.columns]
     if missing_cols:
         raise ValueError(f"以下字段在源文件中不存在: {missing_cols}")
 
+    # 仅用于 feature 解析的 DataFrame（不包含 geometry）
     new_gdf = gdf[cols_to_keep].copy()
     new_gdf.rename(columns={roadid_col: "road_id"}, inplace=True)
     proc_df = new_gdf[feature_cols].copy()
 
+    # ---------- 1) 先把 feature_cols 统一成 float ----------
     def try_extract_numeric_from_str(s):
         if s is None:
             return None
@@ -118,6 +125,16 @@ def build_static_features_for_segments(idx2seg, raw_map, feature_cols, static_fi
             col_mean = 0.0
         proc_df[col] = proc_df[col].fillna(col_mean).astype(np.float32)
 
+    # ---------- 2) 从几何信息里抽一个 (x, y) ----------
+    if "geometry" not in gdf.columns:
+        raise ValueError("shapefile 中缺少 geometry 列，无法提取坐标")
+
+    # 这里用中心点，你也可以改成起点/终点坐标
+    centroids = gdf.geometry.centroid
+    xs = centroids.x.astype(np.float32)
+    ys = centroids.y.astype(np.float32)
+
+    # ---------- 3) 按 road_id 映射到 feature 向量 ----------
     roadid_to_features = {}
     for i, row in new_gdf.iterrows():
         rid = row["road_id"]
@@ -125,15 +142,24 @@ def build_static_features_for_segments(idx2seg, raw_map, feature_cols, static_fi
             rid_key = int(rid)
         except Exception:
             rid_key = rid
-        feats = proc_df.loc[i, feature_cols].to_numpy(dtype=np.float32)
-        roadid_to_features[rid_key] = feats
 
+        base_feats = proc_df.loc[i, feature_cols].to_numpy(dtype=np.float32)
+        x = float(xs.iloc[i])
+        y = float(ys.iloc[i])
+        full_feats = np.concatenate([[x, y], base_feats], axis=0)
+        roadid_to_features[rid_key] = full_feats
+
+    # ---------- 4) 根据 idx2seg 的顺序生成 static_features ----------
     N = len(idx2seg)
-    C = len(feature_cols)
+    C = len(feature_cols) + 2  # 多了 x,y 两列
     static_features = np.zeros((N, C), dtype=np.float32)
     for i, seg in enumerate(idx2seg):
         if seg in roadid_to_features:
             static_features[i] = roadid_to_features[seg]
+        else:
+            # 没有的就保持全 0（包括坐标）
+            pass
+
     np.save(static_file, static_features)
     return static_features
 
@@ -387,19 +413,19 @@ class TRACKDataset(Dataset):
         if traffic_ts_file is None:
             traffic_ts_file = os.path.join(data_root, f'flow_{args.time_interval}min.npy')
         if road_shp_file is None:
-            road_shp_file = os.path.join(data_root, 'map/edges.shp')  # sf porto
-            # road_shp_file = os.path.join(data_root, 'roads_chengdu.shp')
+            #road_shp_file = os.path.join(data_root, 'map/edges.shp')  # sf porto
+            road_shp_file = os.path.join(data_root, 'roads_chengdu.shp')
         if traj_file is None:
             # traj_file = os.path.join(data_root, 'traj_train_100.csv')  #sf
-            # traj_file = os.path.join(data_root, 'traj_converted.csv')  #chengdu
-            traj_file = os.path.join(data_root, 'traj_porto.csv')  #porto
+            traj_file = os.path.join(data_root, 'traj_converted.csv')  #chengdu
+            #traj_file = os.path.join(data_root, 'traj_porto.csv')  #porto
         if roadid_col is None:
-            roadid_col = 'fid'  # sf porto 
-            #roadid_col = 'edge_id' #chengdu
+            #roadid_col = 'fid'  # sf porto 
+            roadid_col = 'edge_id' #chengdu
         if feature_cols is None:
             # feature_cols = ['length', 'lanes', 'oneway']  sf
-            # feature_cols = ['bridge','tunnel','oneway'] cd
-            feature_cols = ['length', 'oneway'] # porto
+            feature_cols = ['bridge','tunnel','oneway']  # cd
+            # feature_cols = ['length', 'oneway'] # porto
 
         self.data_root = data_root
         self.args = args

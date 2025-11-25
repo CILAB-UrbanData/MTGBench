@@ -4,7 +4,7 @@ import time
 import numpy as np
 import torch.nn as nn
 from utils.tools import EarlyStopping, adjust_learning_rate
-from utils.metrics import next_state_loss
+from utils.metrics import next_state_loss, Trajnet_loss
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from data_provider.data_factory import data_provider
 from exp.exp_basic import Exp_Basic
@@ -81,10 +81,12 @@ class ExpPrediction(Exp_Basic):
         return data_set, data_loader
 
     def _select_criterion(self):
-        if self.args.model == "Trajnet" or self.args.model == "MDTP" or self.args.model == "MDTPmini":
+        if self.args.model == "MDTP" or self.args.model == "MDTPmini":
             criterion = nn.L1Loss()
         elif self.args.model == "TRACK":
             criterion = next_state_loss
+        elif self.args.model == "Trajnet":
+            criterion = Trajnet_loss
         else:
             criterion = nn.MSELoss()
         return criterion
@@ -92,11 +94,6 @@ class ExpPrediction(Exp_Basic):
     def vali(self, data_set, data_loader, criterion):
         self.model.eval()
         total_loss = []
-
-        if self.args.model == "Trajnet":
-            data_set.on_epoch_start()
-        if hasattr(self.model, "reset_state"):
-            self.model.reset_state()
 
         with torch.no_grad():
             for i, (inputs, target) in enumerate(data_loader):
@@ -137,12 +134,6 @@ class ExpPrediction(Exp_Basic):
             train_loss = []
             self.model.train()
             epoch_time = time.time()
-
-            if self.args.model == "Trajnet":
-                train_data.on_epoch_start() #Trajnet比较特殊，需要在每个epoch下手动shuffle一下，可能后面修改接口后可以改善
-
-            if hasattr(self.model, "reset_state"):
-                self.model.reset_state()
 
             for i, (inputs, target) in enumerate(train_loader):
                 iter_count += 1
@@ -246,6 +237,16 @@ class ExpPrediction(Exp_Basic):
                 elif self.args.model == 'TrGNN':
                     pred = test_data.scaler.inverse_transform(pred.cpu().numpy()).reshape(-1, self.args.pre_steps)
                     true = test_data.scaler.inverse_transform(targets.cpu().numpy()).reshape(-1, self.args.pre_steps)
+                elif self.args.model == 'Trajnet':
+                    preds_list, segments_list = pred
+                    B = len(preds_list)
+                    for i in range(B):
+                        preds_i = preds_list[i]           # [M_i,T1]
+                        segs_i  = segments_list[i]        # [M_i]
+                        gt_i    = targets[i, segs_i, :]   # [M_i,T1]
+                        y_preds.append(preds_i.cpu().numpy())
+                        y_trues.append(gt_i.cpu().numpy())
+                    continue
                 else:                     
                     pred = pred.cpu().numpy().reshape(-1, self.args.pre_steps)
                     true = targets.cpu().numpy().reshape(-1, self.args.pre_steps)

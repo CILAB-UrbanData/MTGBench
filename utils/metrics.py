@@ -2,6 +2,18 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+def Trajnet_loss(outputs, targets):
+    preds_list, segments_list = outputs
+    B = len(preds_list)
+    total = 0.0
+    for i in range(B):
+        preds_i = preds_list[i]           # [M_i,T1]
+        segs_i  = segments_list[i]        # [M_i]
+        gt_i    = targets[i, segs_i, :]   # [M_i,T1]
+        total  += F.l1_loss(preds_i, gt_i)
+    return total / B
+
+
 def TRACK_loss(r1, r2, mtp_logits1, v1, mask, mtp_time1, times, pred_next_mask, true_next_mask, mask_T, node_avg, args):
     """
     计算 TRACK 的总损失

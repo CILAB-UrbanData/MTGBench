@@ -8,6 +8,7 @@ python -u run.py \
   --model $model_name \
   --data TRACK \
   --NumofRoads 2546 \
+  --static_feat_dim 5 \
   --learning_rate 0.001 \
   --batch_size 16 \
   --lr_scheduler 'cosine' \

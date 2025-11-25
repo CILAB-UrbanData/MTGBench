@@ -1,5 +1,5 @@
-from data_provider.data_loader import MDTPRawloader, SF20_forTrajnet_Dataset, \
-    OtherForMDTP, DiDi_forTrGNN_Dataset, DiDi_forTrajnet_Dataset, TRACKDataset, MDTPSingleLoader, SF_forTrGNN_Dataset
+from data_provider.data_loader import MDTPRawloader, Trajnet_Dataset, \
+    OtherForMDTP, DiDi_forTrGNN_Dataset, TRACKDataset, MDTPSingleLoader, SF_forTrGNN_Dataset
 from torch.utils.data import DataLoader, Subset
 import random
 
@@ -7,28 +7,26 @@ data_dict = {
     'MDTP': MDTPRawloader,
     'MDTPsingle': MDTPSingleLoader,
     'OtherForMDTP': OtherForMDTP,
-    'Trajnet': SF20_forTrajnet_Dataset,
+    'Trajnet': Trajnet_Dataset,
     'TrGNN': SF_forTrGNN_Dataset,
     'DiDiTrGNN': DiDi_forTrGNN_Dataset,
-    'DiDiTrajnet': DiDi_forTrajnet_Dataset,
     'TRACK': TRACKDataset,
 }
 
 def data_provider(args, flag='train'):
-    Data = data_dict[args.data]
+    Data = data_dict[args.model]
 
     shuffle_flag = False if (flag == 'test' or flag == 'TEST') else True
     drop_last = False
     batch_size = args.batch_size
 
     if args.task_name == 'TrafficPrediction':
-        if args.data == 'Trajnet' or args.data == 'DiDiTrajnet':
+        if args.model == 'Trajnet':
             drop_last = False
             shuffle_flag = False
             data_set = Data(
                 args=args,
                 flag=flag,            
-                root_path=args.root_path,
             )
 
         elif args.data == 'TrGNN' or args.data == 'DiDiTrGNN' :
