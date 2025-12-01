@@ -2,13 +2,12 @@ model_name=Trajnet
 
 python -u run.py \
   --task_name TrafficPrediction \
-  --is_training 1 \
+  --is_training 0 \
   --root_path data/GaiyaData/TRACK \
   --shp_file roads_chengdu.shp \
+  --traj_file traj_converted.csv \
   --model $model_name \
   --data chengdu \
-  --normalization True \
-  --tstride 20 \
   --learning_rate 0.0001 \
   --batch_size 64 \
   --lradj 'type5' \
@@ -16,5 +15,6 @@ python -u run.py \
   --train_epochs 100 \
   --patience 20 \
   --NumofRoads 1716 \
-  --traj_file traj_converted.csv \
   --min_flow_count 2000\
+  --time_interval 10 \
+  --tstride 20 \

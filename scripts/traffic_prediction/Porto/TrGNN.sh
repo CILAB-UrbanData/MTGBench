@@ -5,7 +5,7 @@ python -u run.py \
   --is_training 1 \
   --root_path data/Porto/match_jll \
   --model $model_name \
-  --data TrGNN \
+  --data porto \
   --normalization True \
   --learning_rate 0.0001 \
   --batch_size 64 \
@@ -16,5 +16,7 @@ python -u run.py \
   --pre_steps 1 \
   --NumofRoads 2977 \
   --traj_file traj_porto.csv \
-  --preprocess_path preprocess_TrGNNporto.pkl \
-  --time_interval 10000 \
+  --shp_file map/edges.shp \
+  --length_col 'length' \
+  --time_interval 120 \
+  --min_flow_count 10000 \

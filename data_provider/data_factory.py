@@ -1,5 +1,5 @@
 from data_provider.data_loader import MDTPRawloader, Trajnet_Dataset, \
-    OtherForMDTP, DiDi_forTrGNN_Dataset, TRACKDataset, MDTPSingleLoader, SF_forTrGNN_Dataset
+    OtherForMDTP, TRACKDataset, MDTPSingleLoader, Dataset_forTrGNN
 from torch.utils.data import DataLoader, Subset
 import random
 
@@ -8,8 +8,7 @@ data_dict = {
     'MDTPsingle': MDTPSingleLoader,
     'OtherForMDTP': OtherForMDTP,
     'Trajnet': Trajnet_Dataset,
-    'TrGNN': SF_forTrGNN_Dataset,
-    'DiDiTrGNN': DiDi_forTrGNN_Dataset,
+    'TrGNN': Dataset_forTrGNN,
     'TRACK': TRACKDataset,
 }
 
@@ -29,20 +28,18 @@ def data_provider(args, flag='train'):
                 flag=flag,            
             )
 
-        elif args.data == 'TrGNN' or args.data == 'DiDiTrGNN' :
+        elif args.model == 'TrGNN' :
             drop_last = False
             shuffle_flag = True
-            traj_file = args.traj_file
             preprocess_path = args.preprocess_path 
             
             data_set = Data(
                 args = args,
                 flag = flag,
-                traj_file = traj_file,
                 preprocess_path = preprocess_path,
             )
         
-        elif args.data == 'MDTP' or args.data == 'OtherForMDTP'or args.data == 'MDTPsingle':
+        elif args.model == 'MDTP' or args.model == 'MDTPsingle':
             drop_last = True
             shuffle_flag = False
             data_set = Data(
@@ -53,11 +50,10 @@ def data_provider(args, flag='train'):
                 S=args.S
             )
         
-        elif args.data == 'TRACK':
+        elif args.model == 'TRACK':
             drop_last = True 
             shuffle_flag = True 
             data_set = Data(
-                data_root = args.root_path,
                 flag = flag,
                 args = args
             )
@@ -75,8 +71,7 @@ def data_provider(args, flag='train'):
     elif args.task_name == 'TRACK_pretrain':
         drop_last = True 
         shuffle_flag = True 
-        data_set = Data(data_root = args.root_path, 
-                        flag = flag, 
+        data_set = Data(flag = flag, 
                         args = args)
 
         print(flag, len(data_set))

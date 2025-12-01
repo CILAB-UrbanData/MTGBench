@@ -391,8 +391,7 @@ class TRACKDataset(Dataset):
     """
     Dataset where each node is a road segment (road_id).
     """
-    def __init__(self, data_root, flag,
-                 args=None,
+    def __init__(self, args, flag,
                  static_file=None,
                  traffic_ts_file=None,
                  road_shp_file=None,
@@ -407,28 +406,29 @@ class TRACKDataset(Dataset):
                  khop_fallback=2):
         super().__init__()
         os.makedirs(cache_dir, exist_ok=True)
-
+        self.args = args
+        data_root = args.root_path
+        
         if static_file is None:
             static_file = os.path.join(data_root, 'static_features.npy')
         if traffic_ts_file is None:
             traffic_ts_file = os.path.join(data_root, f'flow_{args.time_interval}min.npy')
         if road_shp_file is None:
             #road_shp_file = os.path.join(data_root, 'map/edges.shp')  # sf porto
-            road_shp_file = os.path.join(data_root, 'roads_chengdu.shp')
+            road_shp_file = os.path.join(data_root, self.args.shp_file)  
         if traj_file is None:
             # traj_file = os.path.join(data_root, 'traj_train_100.csv')  #sf
-            traj_file = os.path.join(data_root, 'traj_converted.csv')  #chengdu
+            traj_file = os.path.join(data_root, self.args.traj_file)  #chengdu
             #traj_file = os.path.join(data_root, 'traj_porto.csv')  #porto
-        if roadid_col is None:
-            #roadid_col = 'fid'  # sf porto 
-            roadid_col = 'edge_id' #chengdu
-        if feature_cols is None:
-            # feature_cols = ['length', 'lanes', 'oneway']  sf
-            feature_cols = ['bridge','tunnel','oneway']  # cd
-            # feature_cols = ['length', 'oneway'] # porto
+        if self.args.data == 'chengdu':
+            roadid_col = 'edge_id'
+        else:
+            roadid_col = 'fid'
+        # feature_cols = ['length', 'lanes', 'oneway']  sf
+        feature_cols = self.args.feat_col.split(",")  # cd
+        # feature_cols = ['length', 'oneway'] # porto
 
         self.data_root = data_root
-        self.args = args
         self.road_shp_file = road_shp_file
         self.traj_file = traj_file
         self.static_file = static_file
@@ -444,7 +444,7 @@ class TRACKDataset(Dataset):
         self.min_flow_count = int(self.args.min_flow_count)
 
         # 1) 初始 vocab
-        vocab_cache = os.path.join(cache_dir, f"{os.path.basename(self.traj_file)}_segment_vocab.pkl")
+        vocab_cache = os.path.join(cache_dir, f"{self.args.model}_{self.args.data}_segment_vocab.pkl")
         if os.path.exists(vocab_cache) and not force_recompute:
             with open(vocab_cache, 'rb') as fh:
                 tmp = pickle.load(fh)
@@ -473,6 +473,7 @@ class TRACKDataset(Dataset):
         self.N_total = len(self.idx2seg)                  # 含 UNK
         self.N_graph = self.N_total - 1 if (self.unk_idx is not None) else self.N_total  # 图中有效节点数（不含 UNK）
         self.N = self.N_total  # 兼容旧代码
+        print(f"[Dataset] N_total={self.N_total}, N_graph={self.N_graph}, T_total={self.T_total}")
         
         assert flag in ['train', 'val', 'test']
         N_len = self.T_total - self.T_hist
@@ -519,7 +520,7 @@ class TRACKDataset(Dataset):
         # ---- (1) 为 out_rows 做磁盘缓存 ----
         traj_cache = os.path.join(
             self.cache_dir,
-            f"traj_out_rows_{os.path.basename(self.traj_file)}.pkl"
+            f"traj_out_rows_{self.args.model}_{self.args.data}_{self.args.min_flow_count}.pkl"
         )
 
         if os.path.exists(traj_cache) and not self.force_recompute:
@@ -592,7 +593,7 @@ class TRACKDataset(Dataset):
         # ---- (2) 为转移统计 + 轨迹池也做磁盘缓存 ----
         stats_cache = os.path.join(
             self.cache_dir,
-            f"traj_stats_{os.path.basename(self.traj_file)}.pkl"
+            f"traj_stats_{self.args.model}_{self.args.data}_{self.args.min_flow_count}.pkl"
         )
 
         if os.path.exists(stats_cache) and not self.force_recompute:
@@ -765,7 +766,7 @@ class TRACKDataset(Dataset):
     # ============ 内部工具：缓存名/校验/清洗 ============
     def _edge_cache_name(self, prefix):
         # 签名：minfreq + N_graph，确保不同过滤结果不会撞缓存
-        return os.path.join(self.cache_dir, f"{prefix}_minfreq{self.min_flow_count}_N{self.N_graph}.npy")
+        return os.path.join(self.cache_dir, f"{prefix}_minfreq{self.min_flow_count}_N{self.N_graph}_{self.args.model}_{self.args.data}.npy")
 
     def _assert_edge_index_ok(self, edge_index, name):
         if edge_index is None or edge_index.numel() == 0:

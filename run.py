@@ -43,7 +43,7 @@ if __name__ == '__main__':
     parser.add_argument('--shp_file', type=str, default=None, help='shapefile path for edge information')
     parser.add_argument('--traj_file', type=str, default=None, help='standard order traj file path')
     parser.add_argument('--time_interval', type=int, default=10, help='time interval for flow binning (minutes)')
-    parser.add_argument('--min_flow_count', type=int, default=1000, help='minimum flow count for filtering')
+    parser.add_argument('--min_flow_count', type=int, default=100, help='minimum flow count for filtering')
 
     # model define
     '''MDTP's args'''
@@ -63,7 +63,6 @@ if __name__ == '__main__':
     parser.add_argument('--kernel_size', type=int, default=2, help='kernel size for convolution')
     parser.add_argument('--encoder_layers', type=int, default=3, help='number of layers in the model')
     parser.add_argument('--outChannel_1', type=int, default=16, help='output channel for the first convolution layer')
-    parser.add_argument('--adj', type=str, default='adjacency_1000.pkl')
     parser.add_argument('--tstride', type=int, default=15, help='temporal stride for segmenting time series')
     
     '''TrGNN's args'''
@@ -74,9 +73,11 @@ if __name__ == '__main__':
     parser.add_argument('--warmup_epochs', type=int, default=5, help='number of warmup epochs')
     parser.add_argument('--min_lr_ratio', type=float, default=5e-5, help='minimum learning rate ratio')
     parser.add_argument('--preprocess_path', type=str, default=None, help='preprocess file path for TrGNN')
+    parser.add_argument('--length_col', type=str, default=None, help='column name for road length in shapefile')
     
     '''TRACK args'''
     parser.add_argument('--static_feat_dim', type=int, default=3)
+    parser.add_argument("--feat_col", type=str, default="bridge,tunnel,oneway")
     parser.add_argument('--d_model', type=int, default=32, help='Dimension of the model')
     parser.add_argument('--n_heads', type=int, default=8, help='Number of attention heads')
     parser.add_argument('--traffic_seq_len', type=int, default=7)
@@ -109,7 +110,7 @@ if __name__ == '__main__':
 
     # GPU
     parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')
-    parser.add_argument('--gpu', type=int, default=1, help='gpu')
+    parser.add_argument('--gpu', type=int, default=0, help='gpu')
     parser.add_argument('--gpu_type', type=str, default='cuda', help='gpu type')  # cuda or mps
     parser.add_argument('--use_multi_gpu', action='store_true', help='use multiple gpus', default=False)
     parser.add_argument('--devices', type=str, default='0,1', help='device ids of multiple gpus')

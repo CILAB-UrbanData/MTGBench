@@ -6,9 +6,14 @@ python -u run.py \
   --is_training 1 \
   --root_path data/GaiyaData/TRACK \
   --model $model_name \
-  --data TRACK \
-  --NumofRoads 2546 \
+  --data chengdu \
+  --NumofRoads 3556 \
+  --min_flow_count 1 \
+  --feat_col 'bridge,tunnel,oneway' \
   --static_feat_dim 5 \
+  --traj_file traj_converted.csv \
+  --shp_file roads_chengdu.shp \
+  --time_interval 10 \
   --learning_rate 0.001 \
   --batch_size 16 \
   --lr_scheduler 'cosine' \

@@ -23,13 +23,13 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-class SF_forTrGNN_Dataset(Dataset):
+class Dataset_forTrGNN(Dataset):
     """
-    SF for TrGNN Dataset
+    TrGNN Dataset
     """
     def __init__(self, args, flag, traffic_ts_file=None,
-                 cache_dir = './cache',road_shp_file=None,preprocess_path=None, force_recompute=False,traj_file=None,
-                 roadid_col=None, u_col = None, v_col = None, length_col = None):
+                 cache_dir = './cache',preprocess_path=None, force_recompute=False,
+                 u_col = None, v_col = None, length_col = None):
         os.makedirs(cache_dir, exist_ok=True)
         self.args = args
         self.data_root = self.args.root_path
@@ -37,19 +37,10 @@ class SF_forTrGNN_Dataset(Dataset):
         if traffic_ts_file is None:
             traffic_ts_file = os.path.join(self.data_root,  f'flow_{self.args.time_interval}min.npy')
         else:
-            traffic_ts_file = os.path.join(self.data_root, traffic_ts_file)
-            
-        if road_shp_file is None:
-            road_shp_file = os.path.join(self.data_root, 'map/edges.shp')  
+            traffic_ts_file = os.path.join(self.data_root, traffic_ts_file)           
+        if self.args.data == 'chengdu':
+            roadid_col = 'edge_id'
         else:
-            road_shp_file = os.path.join(self.data_root, road_shp_file)
-            
-        if traj_file is None:
-            traj_file = os.path.join(self.data_root, 'traj_train_100.csv')
-        else:
-            traj_file = os.path.join(self.data_root, traj_file)
-            
-        if roadid_col is None:
             roadid_col = 'fid'
         if u_col is None:
             u_col = 'u'
@@ -59,21 +50,21 @@ class SF_forTrGNN_Dataset(Dataset):
             length_col = 'length'
             
 
-        self.road_shp_file = road_shp_file
-        self.traj_file = traj_file
+        self.road_shp_file = os.path.join(self.data_root, self.args.shp_file)
+        self.traj_file = os.path.join(self.data_root, self.args.traj_file)
         self.roadid_col = roadid_col
         self.u_col = u_col
         self.v_col = v_col
-        self.length_col = length_col
+        self.length_col = self.args.length_col
         self.min_flow_count = int(self.args.min_flow_count)
 
         if preprocess_path is None:
-            preprocess_path = 'cache/preprocess_TrGNNsf.pkl'
+            preprocess_path = f'cache/preprocess_TrGNN_{self.args.data}_nodes_{self.args.NumofRoads}.pkl'
         else:
             preprocess_path = os.path.join(cache_dir, preprocess_path)
         
         # 1) 初始 vocab
-        vocab_cache = os.path.join(cache_dir, f"{os.path.basename(self.traj_file)}_segment_vocab.pkl")
+        vocab_cache = os.path.join(cache_dir, f"{self.args.model}_{self.args.data}_segment_vocab.pkl")
         if os.path.exists(vocab_cache) and not force_recompute:
             with open(vocab_cache, 'rb') as fh:
                 tmp = pkl.load(fh)
@@ -358,8 +349,8 @@ class SF_forTrGNN_Dataset(Dataset):
         只统计转移次数，不做归一化。
         输出形状 (T, N, N)，其中 N = len(idx2seg)，最后一个索引为 UNK。
         """
-        if os.path.exists(os.path.join(os.path.dirname(self.traj_file),"transition.npy")):
-            counts = np.load(os.path.join(os.path.dirname(self.traj_file),"transition.npy"))
+        if os.path.exists(os.path.join(os.path.dirname(self.traj_file),f"transition_{interval}_mins_minflow_{self.min_flow_count}.npy")):
+            counts = np.load(os.path.join(os.path.dirname(self.traj_file),f"transition_{interval}_mins_minflow_{self.min_flow_count}.npy"))
             return counts
         
         N = len(self.idx2seg)
@@ -447,7 +438,7 @@ class SF_forTrGNN_Dataset(Dataset):
             f"time: {elapsed_total/60.0:.2f} min"
         )
 
-        np.save(os.path.join(os.path.dirname(self.traj_file),"transition.npy"),counts)
+        np.save(os.path.join(os.path.dirname(self.traj_file),f"transition_{interval}_mins_minflow_{self.min_flow_count}.npy"),counts)
         return counts
 
 class DiDi_forTrGNN_Dataset(Dataset):

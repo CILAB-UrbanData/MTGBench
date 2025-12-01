@@ -9,14 +9,28 @@ def print_args(args):
     print(f'  {"Data Path:":<20}{args.data_path:<20}{"Checkpoints:":<20}{args.checkpoints:<20}')
     print()
 
-    if args.model == 'MDTP':
+    if args.task_name == 'TrafficPrediction' or args.task_name == 'TRACK_pretrain':
+        print("\033[1m" + "Traffic Prediction Task Parameters" + "\033[0m")
+        print(f'  {"Number of Nodes:":<20}{args.NumofRoads:<20}{"min flow count"}{args.min_flow_count:<20}')
+        print(f'  {"Input Length:":<20}{args.seq_len:<20}{"Output Length:":<20}{args.pre_steps:<20}')
+        print()            
         print("\033[1m" + "Model Parameters" + "\033[0m")
-        print(f'  {"In Feats:":<20}{args.in_feats:<20}{"Gcn Hidden:":<20}{args.gcn_hidden:<20}')
-        print(f'  {"Lstm Hidden:":<20}{args.lstm_hidden:<20}{"Fusion:":<20}{args.fusion:<20}')
-        print(f'  {"N Nodes:":<20}{args.N_regions:<20}{"Num Layers:":<20}{args.num_layers:<20}')
-        print(f'  {"GradClip:":<20}{args.grad_clip:<20}{"Dropout:":<20}{args.dropout:<20}')
-        print(f'  {"S:":<20}{args.S:<20}')
-        print()
+        if args.model == 'MDTP':
+            print(f'  {"In Feats:":<20}{args.in_feats:<20}{"Gcn Hidden:":<20}{args.gcn_hidden:<20}')
+            print(f'  {"Lstm Hidden:":<20}{args.lstm_hidden:<20}{"Fusion:":<20}{args.fusion:<20}')
+            print(f'  {"N Nodes:":<20}{args.N_regions:<20}{"Num Layers:":<20}{args.num_layers:<20}')
+            print(f'  {"GradClip:":<20}{args.grad_clip:<20}{"Dropout:":<20}{args.dropout:<20}')
+            print(f'  {"S:":<20}{args.S:<20}')
+            print()
+        if args.model == 'TrGNN':
+            print(f'  {"Demand Hop:":<20}{args.demand_hop:<20}{"Status Hop:":<20}{args.status_hop:<20}')
+            print(f'  {"Start Date:":<20}{args.start_date:<20}{"End Date:":<20}{args.end_date:<20}')
+            print()
+        if args.model == 'TRACK':
+            print(f'  {"Static Feat Dim:":<20}{args.static_feat_dim:<20}{"Feat Col:":<20}{args.feat_col:<20}')
+            print(f'  {"D Model:":<20}{args.d_model:<20}{"N Heads:":<20}{args.n_heads:<20}')
+            print()
+    
 
     print("\033[1m" + "Run Parameters" + "\033[0m")
     print(f'  {"Num Workers:":<20}{args.num_workers:<20}{"Itr:":<20}{args.itr:<20}')

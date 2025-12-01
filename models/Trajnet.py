@@ -154,12 +154,12 @@ class Model(nn.Module):
         super().__init__()
         self.encoder    = SegmentEncoder(1, args.outChannel_1, args.T1, args.T2, args.T3, args.kernel_size, args.encoder_layers)
         self.n_h = args.T1 * (1 + args.T2 + args.T3)  
-        args.adj_mask = os.path.join(args.cache_dir, f'adjacency_{args.min_flow_count}_{args.data}.pkl')
+        args.adj_mask = os.path.join(args.cache_dir, f'Trajnet_adjacency_{args.min_flow_count}_{args.data}.pkl')
         self.attention = SpatialAttention(args.NumofRoads, self.n_h, args.outChannel_1, args.adj_mask)  # [NumofRoads, NumofRoads]
         self.propagator = PropagatorWithForest(self.n_h, args.outChannel_1)
         self.predictor  = Predictor(pred_steps=args.T1)
         self.device = args.device
-        self.__init_weights()  # 初始化权重
+        self.__init_weights()  # 初始化权重 
 
     def __init_weights(self):
         """

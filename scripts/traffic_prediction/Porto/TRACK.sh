@@ -5,7 +5,7 @@ python -u run.py \
   --is_training 1 \
   --root_path data/Porto/match_jll \
   --model $model_name \
-  --data TRACK \
+  --data porto \
   --NumofRoads 2977 \
   --learning_rate 0.001 \
   --batch_size 32 \
@@ -19,7 +19,10 @@ python -u run.py \
   --train_epochs 50 \
   --patience 10 \
   --pre_steps 1 \
-  --load_pretrained \
   --min_flow_count 10000 \
   --time_interval 120 \
-  --static_feat_dim 2 
+  --static_feat_dim 4 \
+  --load_pretrained \
+  --feat_col 'length,oneway' \
+  --shp_file map/edges.shp \
+  --traj_file traj_porto.csv \ 

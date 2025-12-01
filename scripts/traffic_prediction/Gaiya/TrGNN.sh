@@ -2,10 +2,13 @@ model_name=TrGNN
 
 python -u run.py \
   --task_name TrafficPrediction \
-  --is_training 0 \
+  --is_training 1 \
   --root_path data/GaiyaData/TrGNN/processed \
+  --shp_file road_shp_with_extra.shp \
+  --traj_file traj_converted.csv \
+  --length_col 'length_m' \
   --model $model_name \
-  --data DiDiTrGNN \
+  --data chengdu \
   --normalization True \
   --learning_rate 0.002 \
   --batch_size 64 \
@@ -18,7 +21,9 @@ python -u run.py \
   --itr 1 \
   --train_epochs 100 \
   --patience 20 \
+  --min_flow_count 1 \
   --NumofRoads 3555 \
+  --time_interval 10 \
   --start_date 20161101\
   --end_date 20161130 \
   --pre_steps 1 \

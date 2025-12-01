@@ -4,8 +4,10 @@ python -u run.py \
   --task_name TrafficPrediction \
   --is_training 1 \
   --root_path data/sf_data/raw \
+  --shp_file map/edges.shp \
+  --traj_file traj_train_100.csv \
   --model $model_name \
-  --data TrGNN \
+  --data SF \
   --normalization True \
   --learning_rate 0.0001 \
   --batch_size 64 \
@@ -16,3 +18,5 @@ python -u run.py \
   --pre_steps 1 \
   --NumofRoads 3165 \
   --min_flow_count 500 \
+  --time_interval 10 \
+  --length_col 'length' \

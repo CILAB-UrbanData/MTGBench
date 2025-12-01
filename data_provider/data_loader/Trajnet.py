@@ -152,7 +152,6 @@ class Trajnet_Dataset(Dataset):
         args,
         flag: str,
         traffic_ts_file: str = 'flow_10min.npy',
-        roadid_col: str = "fid",
         trunc_length: int = 7,
         samples_per_segment: int = 5,
         force_recompute: bool = False,
@@ -160,11 +159,16 @@ class Trajnet_Dataset(Dataset):
         super().__init__()
         assert flag in ["train", "val", "test"]
         self.flag = flag
+        self.args = args
         self.root_path = args.root_path
         self.road_shp_file = os.path.join(self.root_path, args.shp_file)
         self.traj_file = os.path.join(self.root_path, args.traj_file)        
         self.time_interval = int(getattr(args, "time_interval", 10))
         self.traffic_ts_file = os.path.join(self.root_path, f"flow_{self.time_interval}min.npy")
+        if self.args.data == 'chengdu':
+            roadid_col = 'edge_id'
+        else:
+            roadid_col = 'fid'
         self.roadid_col = roadid_col
         self.min_flow_count = args.min_flow_count
 
@@ -185,7 +189,7 @@ class Trajnet_Dataset(Dataset):
         # ========== 1) 从 shp 构建初始 vocab（完全复用 TRACK 的逻辑） ==========
         vocab_cache = os.path.join(
             self.cache_dir,
-            f"{os.path.basename(self.traj_file)}_{args.model}_segment_vocab.pkl"
+            f"{self.args.model}_{self.args.data}_segment_vocab.pkl"
         )
 
         if os.path.exists(vocab_cache) and not self.force_recompute:
@@ -255,7 +259,7 @@ class Trajnet_Dataset(Dataset):
         adj[src, dst] = True
         adj[dst, src] = True
         self.adj_mask = adj    # 下游直接用 dataset.adj_mask
-        with open(os.path.join(self.cache_dir, f"adjacency_{self.min_flow_count}_{args.data}.pkl"), "wb") as f:
+        with open(os.path.join(self.cache_dir, f"Trajnet_adjacency_{self.min_flow_count}_{args.data}.pkl"), "wb") as f:
             import pickle as pkl
             pkl.dump(self.adj_mask, f)
             
@@ -264,7 +268,7 @@ class Trajnet_Dataset(Dataset):
 
         cache_remap_path = os.path.join(
             self.cache_dir,
-            f"remapped_trajs_minflow{self.min_flow_count}_Nseg{self.N_seg}_{args.data}.pkl"
+            f"Trajnet_remapped_trajs_minflow{self.min_flow_count}_Nseg{self.N_seg}_{self.args.data}.pkl"
         )
 
         if os.path.exists(cache_remap_path) and (not self.force_recompute):
@@ -480,14 +484,22 @@ if __name__ == "__main__":
     # args.model = "Trajnet"
     # args.tstride = 20
     # args.data = "chengdu"
-    args.root_path = "data/Porto/match_jll"
+    # args.root_path = "data/Porto/match_jll"
+    # args.shp_file = "map/edges.shp"
+    # args.traj_file = "traj_porto.csv"
+    # args.cache_dir = "./cache"
+    # args.model = "Trajnet"
+    # args.tstride = 300
+    # args.min_flow_count = 25000
+    # args.data = "porto"
+    args.root_path = "data/sf_data/raw"
     args.shp_file = "map/edges.shp"
-    args.traj_file = "traj_porto.csv"
+    args.traj_file = "traj_train_100.csv"
     args.cache_dir = "./cache"
     args.model = "Trajnet"
-    args.tstride = 300
-    args.min_flow_count = 25000
-    args.data = "porto"
+    args.tstride = 15
+    args.min_flow_count = 1000
+    args.data = "sf"
     args.T1 = 6
     args.T2 = 2
     args.T3 = 2

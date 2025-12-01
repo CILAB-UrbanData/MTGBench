@@ -25,7 +25,10 @@ class MDTPRawloader(Dataset):
         self.normalization = normalization
         self.S = S
         if self.normalization:
-            self.data_path = "processed.npz"
+            if flag != 'test':
+                self.data_path = "processed.npz"
+            else:
+                self.data_path = "processedonlygreen.npz"
         else:
             self.data_path = "processedwithoutnormalization.npz"
         path = os.path.join(self.root_path, self.data_path)
