@@ -22,7 +22,7 @@ python -u run.py \
   --train_epochs 100 \
   --patience 20 \
   --min_flow_count 1 \
-  --NumofRoads 3555 \
+  --NumofRoads 3556 \
   --time_interval 10 \
   --start_date 20161101\
   --end_date 20161130 \
