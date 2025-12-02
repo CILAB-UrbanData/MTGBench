@@ -1,4 +1,4 @@
-# Times-Series-Library 工程结构通俗解析 #
+![MTG Logo](fig/MTG-logo-hires-transparent.png)
 
 ## 1. 主程序 run.py ##
 终端 or shell脚本输入 ----  `argparse` ---> 记录下所有参数的args
