@@ -3,7 +3,8 @@
 
 ------
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/) [![Pytorch](https://img.shields.io/badge/Pytorch-2.2.1%2B-blue)](https://pytorch.org/) 
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/) [![Pytorch](https://img.shields.io/badge/Pytorch-2.2.1%2B-blue)](https://pytorch.org/) ![Gitea Stars](https://img.shields.io/gitea/stars/CILAB-UrbanData/MTGBench)
+
 
 # MTGBench
 
