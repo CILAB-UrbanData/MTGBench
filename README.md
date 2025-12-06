@@ -3,7 +3,7 @@
 
 ------
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/) [![Pytorch](https://img.shields.io/badge/Pytorch-2.2.1%2B-blue)](https://pytorch.org/) ![Gitea Stars](https://img.shields.io/gitea/stars/CILAB-UrbanData/MTGBench)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/) [![Pytorch](https://img.shields.io/badge/Pytorch-2.2.1%2B-blue)](https://pytorch.org/) [![Star](https://img.shields.io/github/stars/CILAB-UrbanData/MTGBench?style=social)](https://github.com/CILAB-UrbanData/MTGBench/stargazers) [![fork](https://img.shields.io/github/forks/CILAB-UrbanData/MTGBench?style=social)](https://github.com/CILAB-UrbanData/MTGBench/network/members) 
 
 
 # MTGBench
