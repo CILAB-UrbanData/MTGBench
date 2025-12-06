@@ -64,7 +64,7 @@ To start training or testing, simply run:
 ```bash
 ./scripts/traffic_prediction/sf/TrGNN.sh
 ```
-This script runs a GRU model on the San Francisco dataset for traffic state prediction using default configurations.
+This script runs the TrGNN model on the San Francisco dataset for traffic state prediction using default configurations.
 
 ## Tutorial
 To add your own model to MTGBench:
