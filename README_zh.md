@@ -50,7 +50,7 @@ MTGBench 目前支持以下任务：
 ./scripts/traffic_prediction/sf/TrGNN.sh
 ```
 
-该脚本将在默认配置下，在 SanFrancisco 数据集上运行 GRU 模型，以进行交通状态预测任务。
+该脚本将在默认配置下，在 SanFrancisco 数据集上运行 TrGNN 模型，以进行交通状态预测任务。
 
 ## Tutorial
 * 在 `./models` 文件夹下添加模型文件。你可以参考 `./models/TrGNN.py`
