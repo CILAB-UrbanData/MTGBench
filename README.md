@@ -1,43 +1,80 @@
 <img src="fig/MTG-logo-hires-transparent.png" width="260" align="left" />
-<br clear="left" />
+<br clear="left" /><br>
 
-## 1. 主程序 run.py ##
-终端 or shell脚本输入 ----  `argparse` ---> 记录下所有参数的args
+------
 
-args ---- `args match` ---> 提取args信息
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/) [![Pytorch](https://img.shields.io/badge/Pytorch-2.2.1%2B-blue)](https://pytorch.org/) 
 
-args信息 ---- `Exp` ---> 根据信息实例化每个任务对应的Exp对象并执行
+# MTGBench
 
-## 2. 任务执行程序Exp ##
-每个Exp类下都对应一个任务，实现了同一任务下的不同模型的train, validate, test<br><br>
-具体调用哪个Exp以及Exp下使用哪个model,取决于args解析出的任务信息和模型信息
+[Dataset Download](https://cilab-urbandata.github.io/) | [Dataset Processing Code](https://github.com/CILAB-UrbanData/MTGBench-Dataset) | [Conference Paper]() | [中文](https://github.com/CILAB-UrbanData/MTGBench)
 
-## 3. models和layers ##
-每个models的各个block定义在 `./models/模型名称.py` 的文件下，基本就是按照原文的网络设计搭建起来网络架构
+---
 
-各个block可能用到的一些可复用的功能函数放在 `./layers/函数功能.py` 的文件下
+MTGBench is a unified, novel, and extensible benchmarking framework designed for emerging traffic prediction tasks.  
+It provides a reliable development and evaluation platform built upon PyTorch, with improvements inspired by excellent open-source frameworks such as [TSLib](https://github.com/thuml/Time-Series-Library/tree/main) and [LibCity](https://github.com/LibCity/Bigscity-LibCity?tab=readme-ov-file).
 
-## 4. 数据迭代器data_provider ##
-将已经预处理好的数据或者源数据放在 `./data/数据集名称/` 这个目录下
+MTGBench currently supports:
 
-相应的数据集合的dataset实现放在 `./data_provider/data_factory.py` 下，每个数据集对应一个，如果有特殊的collate_fn也在该文件下实现
+* **Traffic State Prediction**
+  * Trajectory-based traffic state prediction  
+  * Order-based traffic state prediction  
 
-相应的数据迭代器的loader实现放在 `./data_provider/data_loader.py` 下，主要是根据相应的args的任务信息加载数据迭代器
+---
 
-## 5. 启动脚本scripts ##
-基本上每个模型所需的相关参数都很长，所以最后是写成一个shell脚本启动，`./scripts` 下有原作者本来的shell脚本示例
+## Features
 
-# 代码重构相关文件 #
-1. run的args部分加入自己所需的参数，并更新`./utils/print_args.py`
-2. `./models`和`./layers`下实现自己的模型
-3. 如果实现的模型已经有合适的Exp那最好，否则要么是新写一个模型要么是给比较接近的Exp再加一个分支
+### **• Unified**
+MTGBench provides a systematic pipeline integrating model implementation, usage, and evaluation into a single unified platform. It includes standardized spatiotemporal data formats, a unified model instantiation interface, and consistent evaluation procedures.
 
-# 目前以实现的方法和对应的Exp #
-exp_lstm(使用了lstm的交通预测任务，即lstm_based) ------- MDTP
+### **• Novel**
+MTGBench emphasizes emerging traffic prediction tasks, where models may include trajectories or OD flows as inputs in addition to traditional traffic state data.
 
-exp_prediction(没有使用lstm的较为通用的交通预测任务) ------- Trajnet, TrGNN
+### **• Extensible**
+MTGBench adopts a fully modular design that allows users to flexibly incorporate custom components.  
+Researchers can easily develop new models on top of MTGBench.
 
-# 数据链接 #
-[百度网盘数据链接](https://pan.baidu.com/s/1s3VafVC22W18ktWrjqEaRg?pwd=ss52)
+---
 
+## Overall Framework
 
+<img src="fig/pipeline_original.png" width="500" align="left" />
+<br clear="left" /><br>
+
+* **./scripts/** — Shell scripts for launching each task/model with corresponding hyperparameters  
+* **./data_provider/** —  
+  * `data_factory.py`: instantiates different data_loader objects  
+  * `./data_provider/data_loader/`: contains data reading, preprocessing, and sampling logic for each model  
+* **./exp/** — Unified training and evaluation scripts across tasks  
+* **run.py** — Main program entry: loads hyperparameters, instantiates experiment classes, and executes training and testing  
+
+---
+
+## Quick Start
+
+Before running any model in MTGBench, ensure you have downloaded at least one dataset and placed it under `./data/`.  
+Datasets can be downloaded from:  
+👉 **https://cilab-urbandata.github.io/**
+
+All datasets must be preprocessed according to the format described in:  
+👉 **https://github.com/CILAB-UrbanData/MTGBench-Dataset**
+
+To start training or testing, simply run:
+
+```bash
+./scripts/traffic_prediction/sf/TrGNN.sh
+```
+This script runs a GRU model on the San Francisco dataset for traffic state prediction using default configurations.
+
+## Tutorial
+To add your own model to MTGBench:
+
+* Add your model file under `./models/`. For reference, see: `./models/TrGNN.py`. Then Register your model in
+`./exp/exp_basic.py` → `Exp_Basic.model_dict`
+
+* Register your data processing components in
+`./data_provider/data_factory.py` → `data_dict`
+and
+`./data_provider/data_loader/__init__.py`
+
+* Add a corresponding launch script under `./scripts/`
