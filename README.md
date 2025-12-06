@@ -7,7 +7,7 @@
 
 # MTGBench
 
-[Dataset Download](https://cilab-urbandata.github.io/) | [Dataset Processing Code](https://github.com/CILAB-UrbanData/MTGBench-Dataset) | [Conference Paper]() | [中文](https://github.com/CILAB-UrbanData/MTGBench)
+[Dataset Download](https://cilab-urbandata.github.io/) | [Dataset Processing Code](https://github.com/CILAB-UrbanData/MTGBench-Dataset) | [Conference Paper]() | [中文](https://github.com/CILAB-UrbanData/MTGBench/blob/master/README_zh.md)
 
 ---
 
