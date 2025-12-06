@@ -7,8 +7,7 @@ python -u run.py \
   --shp_file map/edges.shp \
   --traj_file traj_train_100.csv \
   --model $model_name \
-  --data Trajnet \
-  --normalization True \
+  --data SF \
   --learning_rate 0.0001 \
   --batch_size 64 \
   --lradj 'type5' \

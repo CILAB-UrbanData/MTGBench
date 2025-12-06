@@ -4,10 +4,10 @@ model_name=MDTPsingle
 python -u run.py \
   --task_name TrafficPrediction\
   --is_training 1 \
-  --root_path data/sf_data/MDTP/processed\
+  --root_path data/sf_data/MDTP\
+  --mdtp_taxi_path TrajwithRegion.csv \
   --model $model_name \
-  --data OtherForMDTP \
-  --normalization True \
+  --data SF \
   --learning_rate 0.0001 \
   --batch_size 32 \
   --lradj 'type4' \

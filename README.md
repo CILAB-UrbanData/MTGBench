@@ -1,4 +1,5 @@
-![MTG Logo](fig/MTG-logo-hires-transparent.png)
+<img src="fig/MTG-logo-hires-transparent.png" width="260" align="left" />
+<br clear="left" />
 
 ## 1. 主程序 run.py ##
 终端 or shell脚本输入 ----  `argparse` ---> 记录下所有参数的args

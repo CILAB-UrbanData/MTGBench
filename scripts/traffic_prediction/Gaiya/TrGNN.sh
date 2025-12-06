@@ -9,7 +9,6 @@ python -u run.py \
   --length_col 'length_m' \
   --model $model_name \
   --data chengdu \
-  --normalization True \
   --learning_rate 0.002 \
   --batch_size 64 \
   --lr_scheduler 'cosine' \

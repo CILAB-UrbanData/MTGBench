@@ -4,10 +4,10 @@ model_name=MDTPsingle
 python -u run.py \
   --task_name TrafficPrediction\
   --is_training 1 \
-  --root_path ./data/NYC_Taxi\&Bike/MDTP/processed \
+  --root_path data/NYC/MDTP/processed \
+  --mdtp_taxi_path part.0.parquet \
   --model $model_name \
-  --data MDTPsingle \
-  --normalization True \
+  --data NYCTAXI \
   --learning_rate 0.0001 \
   --batch_size 32 \
   --lradj 'type4' \

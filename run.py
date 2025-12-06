@@ -31,7 +31,6 @@ if __name__ == '__main__':
     parser.add_argument('--data', type=str, required=True, default='ETTh1', help='dataset type')
     parser.add_argument('--root_path', type=str, default='./data/ETT/', help='root path of the data file')
     parser.add_argument('--checkpoints', type=str, default='./checkpoints/', help='location of model checkpoints')
-    parser.add_argument('--normalization', type=bool, default=True, help='whether to normalize the data')
     parser.add_argument('--log_dir', type=str, default='./logs/', help='location of log files')
     parser.add_argument('--cache_dir', type=str, default='./cache/', help='location of cache files')
 
@@ -54,6 +53,8 @@ if __name__ == '__main__':
     parser.add_argument('--num_layers', type=int, default=2, help='number of layers in the model')
     parser.add_argument('--S', type=int, default=24, help='sequence length for traffic prediction')
     parser.add_argument('--dropout', type=float, default=0.5, help='dropout')
+    parser.add_argument('--mdtp_taxi_path', type=str, default=None, help='path for MDTP taxi raw data')
+    parser.add_argument('--mdtp_bike_path', type=str, default=None, help='path for MDTP bike raw data')
 
     '''Trajnet's args'''
     parser.add_argument('--T1', type=int, default=6, help='number of recent time steps')

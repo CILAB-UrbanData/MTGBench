@@ -3,10 +3,11 @@ model_name=MDTP
 python -u run.py \
   --task_name TrafficPrediction\
   --is_training 0 \
-  --root_path ./data/NYC_Taxi\&Bike/MDTP/processed \
+  --root_path data/NYC/MDTP\
+  --mdtp_taxi_path part.0.parquet \
+  --mdtp_bike_path bike_data_with_region.csv \
   --model $model_name \
-  --data MDTPgreen \
-  --normalization True \
+  --data NYCFULL \
   --learning_rate 0.0001 \
   --batch_size 32 \
   --lradj 'type4' \

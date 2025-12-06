@@ -1,12 +1,11 @@
 from data_provider.data_loader import MDTPRawloader, Trajnet_Dataset, \
-    OtherForMDTP, TRACKDataset, MDTPSingleLoader, Dataset_forTrGNN
+    TRACKDataset, MDTPSingleLoader, Dataset_forTrGNN
 from torch.utils.data import DataLoader, Subset
 import random
 
 data_dict = {
     'MDTP': MDTPRawloader,
     'MDTPsingle': MDTPSingleLoader,
-    'OtherForMDTP': OtherForMDTP,
     'Trajnet': Trajnet_Dataset,
     'TrGNN': Dataset_forTrGNN,
     'TRACK': TRACKDataset,
@@ -46,7 +45,6 @@ def data_provider(args, flag='train'):
                 args = args,
                 root_path=args.root_path,
                 flag=flag,
-                normalization=args.normalization,
                 S=args.S
             )
         

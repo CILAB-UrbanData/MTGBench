@@ -3,10 +3,10 @@ model_name=MDTPsingle
 python -u run.py \
   --task_name TrafficPrediction\
   --is_training 0 \
-  --root_path data/Porto/MDTP/processed\
+  --root_path data/Porto/MDTP\
+  --mdtp_taxi_path TrajwithRegion.csv \
   --model $model_name \
-  --data OtherForMDTP \
-  --normalization True \
+  --data porto \
   --learning_rate 0.0001 \
   --batch_size 64 \
   --lradj 'type4' \

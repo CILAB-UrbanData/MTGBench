@@ -5,10 +5,10 @@ model_name=MDTPsingle
 python -u run.py \
   --task_name TrafficPrediction \
   --is_training 0 \
-  --root_path /mnt/nas/home/cilab/wyx_ws/Traffic-Benchmark/data/GaiyaData/MDTP/processed \
+  --root_path data/GaiyaData/MDTP \
+  --mdtp_taxi_path merged_with_grid.csv \
   --model $model_name \
-  --data OtherForMDTP \
-  --normalization True \
+  --data chengdu \
   --learning_rate 0.0001 \
   --batch_size 32 \
   --lradj 'type4' \

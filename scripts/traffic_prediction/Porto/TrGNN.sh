@@ -6,7 +6,6 @@ python -u run.py \
   --root_path data/Porto/match_jll \
   --model $model_name \
   --data porto \
-  --normalization True \
   --learning_rate 0.0001 \
   --batch_size 64 \
   --lradj 'type5' \
