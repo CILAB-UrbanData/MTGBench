@@ -17,7 +17,7 @@ It provides a reliable development and evaluation platform built upon PyTorch, w
 
 MTGBench currently supports:
 
-* **Traffic State Prediction**
+* **Road Condition Generation**
   * Trajectory-based traffic state prediction  
   * Order-based traffic state prediction  
 
