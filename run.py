@@ -8,6 +8,7 @@ from utils.print_args import print_args
 import random
 import wandb
 import numpy as np
+import time
 
 os.environ["WANDB_MODE"] = "offline"
 
@@ -114,6 +115,8 @@ if __name__ == '__main__':
     parser.add_argument('--devices', type=str, default='0,1', help='device ids of multiple gpus')
 
     args = parser.parse_args()
+    
+    start_time = time.time()
 
     wandb.init(
     project="Traffic-Benchmark",
@@ -168,6 +171,7 @@ if __name__ == '__main__':
                 torch.backends.mps.empty_cache()
             elif args.gpu_type == 'cuda':
                 torch.cuda.empty_cache()
+        print('Avg time per itr: {:.4f} seconds'.format((time.time() - start_time)/args.itr))
     else:
         exp = Exp(args)  # set experiments
         ii = 0

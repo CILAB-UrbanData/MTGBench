@@ -19,6 +19,7 @@ class Exp_Basic(object):
 
         self.device = self._acquire_device()
         self.model = self._build_model().to(self.device)
+        print("Model built successfully.Parameters count: ", sum(p.numel() for p in self.model.parameters()))
         self.model_optim = self._select_optimizer()
         self.lr_istorch = args.lr_istorch
         self.lr_scheduler = None

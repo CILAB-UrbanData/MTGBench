@@ -2,7 +2,7 @@ model_name=MDTPsingle
 
 python -u run.py \
   --task_name TrafficPrediction\
-  --is_training 0 \
+  --is_training 1 \
   --root_path data/Porto/MDTP\
   --mdtp_taxi_path TrajwithRegion.csv \
   --model $model_name \
