@@ -2,7 +2,7 @@ model_name=MDTP
 
 python -u run.py \
   --task_name TrafficPrediction\
-  --is_training 0 \
+  --is_training 1 \
   --root_path data/NYC/MDTP\
   --mdtp_taxi_path part.0.parquet \
   --mdtp_bike_path bike_data_with_region.csv \
