@@ -17,7 +17,7 @@ python -u run.py \
   --adamw_beta2 0.95 \
   --adamw_weight_decay 0.001 \
   --grad_clip 1.0 \
-  --itr 1 \
+  --itr 5 \
   --train_epochs 100 \
   --patience 20 \
   --min_flow_count 1 \

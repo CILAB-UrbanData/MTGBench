@@ -4,7 +4,7 @@ model_name=MDTPsingle
 python -u run.py \
   --task_name TrafficPrediction\
   --is_training 1 \
-  --root_path data/NYC/MDTP/processed \
+  --root_path data/NYC/MDTP \
   --mdtp_taxi_path part.0.parquet \
   --model $model_name \
   --data NYCTAXI \

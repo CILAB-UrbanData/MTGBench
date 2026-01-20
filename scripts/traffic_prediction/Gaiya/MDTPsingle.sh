@@ -4,7 +4,7 @@ model_name=MDTPsingle
 
 python -u run.py \
   --task_name TrafficPrediction \
-  --is_training 0 \
+  --is_training 1 \
   --root_path data/GaiyaData/MDTP \
   --mdtp_taxi_path merged_with_grid.csv \
   --model $model_name \
