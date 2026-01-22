@@ -9,7 +9,7 @@ python -u run.py \
   --NumofRoads 7239 \
   --min_flow_count 100 \
   --feat_col 'length,lanes,oneway' \
-  --static_feat_dim 5 \
+  --static_feat_dim 3 \
   --traj_file traj_train_100.csv \
   --shp_file map/edges.shp \
   --time_interval 10 \
