@@ -174,6 +174,7 @@ if __name__ == '__main__':
             elif args.gpu_type == 'cuda':
                 torch.cuda.empty_cache()
         print('Avg time per itr: {:.4f} seconds'.format((time.time() - start_time)/args.itr))
+        print("Model trained successfully.Parameters count: ", sum(p.numel() for p in exp.model.parameters()))
     else:
         exp = Exp(args)  # set experiments
         ii = 0

@@ -9,7 +9,7 @@ python -u run.py \
   --learning_rate 0.0001 \
   --batch_size 64 \
   --lradj 'type5' \
-  --itr 1 \
+  --itr 5 \
   --train_epochs 100 \
   --patience 20 \
   --pre_steps 1 \

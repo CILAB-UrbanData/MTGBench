@@ -24,4 +24,4 @@ python -u run.py \
   --static_feat_dim 4 \
   --feat_col 'length,oneway' \
   --shp_file map/edges.shp \
-  --traj_file traj_porto.csv \ 
+  --traj_file traj_porto.csv
