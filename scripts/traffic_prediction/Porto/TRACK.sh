@@ -25,4 +25,4 @@ python -u run.py \
   --load_pretrained \
   --feat_col 'length,oneway' \
   --shp_file map/edges.shp \
-  --traj_file traj_porto.csv \ 
+  --traj_file traj_porto.csv 

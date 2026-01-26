@@ -425,8 +425,8 @@ class TRACKDataset(Dataset):
         else:
             roadid_col = 'fid'
         # feature_cols = ['length', 'lanes', 'oneway']  sf
-        feature_cols = self.args.feat_col.split(",")  # cd
-        # feature_cols = ['length', 'oneway'] # porto
+        # feature_cols = self.args.feat_col.split(",")  # cd
+        feature_cols = ['length', 'oneway'] # porto
 
         self.data_root = data_root
         self.road_shp_file = road_shp_file

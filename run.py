@@ -13,13 +13,14 @@ import time
 os.environ["WANDB_MODE"] = "offline"
 
 if __name__ == '__main__':
+    def set_seed(seed: int):
+        random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        np.random.seed(seed)
+        
     fix_seed = 2021
-    random.seed(fix_seed)
-    torch.manual_seed(fix_seed)
-    torch.cuda.manual_seed(fix_seed)
-    torch.cuda.manual_seed_all(fix_seed)
-    np.random.seed(fix_seed)
-
     parser = argparse.ArgumentParser(description='Traffic-Benchmark')
 
     # basic config
@@ -95,6 +96,7 @@ if __name__ == '__main__':
     # optimization
     parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
     parser.add_argument('--itr', type=int, default=10, help='experiments times')
+    parser.add_argument('--ii', type=int, default=0, help='used for counting experiments')
     parser.add_argument('--train_epochs', type=int, default=1, help='train epochs')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size of train input data')
     parser.add_argument('--patience', type=int, default=20, help='early stopping patience')
@@ -153,6 +155,8 @@ if __name__ == '__main__':
     if args.is_training:
         for ii in range(args.itr):
             # setting record of experiments
+            set_seed(fix_seed + ii)
+            args.ii = ii
             exp = Exp(args)  # set experiments
             setting = '{}_{}_{}_{}_lr_{}_ba_{}_epo_{}_itr_{}'.format(
                 args.task_name,
@@ -162,7 +166,7 @@ if __name__ == '__main__':
                 args.learning_rate,
                 args.batch_size,
                 args.train_epochs,
-                ii)
+                args.ii)
 
             print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
             exp.train(setting)

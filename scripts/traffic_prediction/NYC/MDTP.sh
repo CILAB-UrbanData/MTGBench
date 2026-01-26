@@ -12,7 +12,7 @@ python -u run.py \
   --batch_size 32 \
   --lradj 'type4' \
   --N_regions 264 \
-  --itr 1 \
+  --itr 5 \
   --train_epochs 200 \
   --patience 20 \
   --dropout 0.5

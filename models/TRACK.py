@@ -113,8 +113,8 @@ class Model(nn.Module):
         self.traj_trans = TrajectoryTransformer(args)
         self.coatt_blocks = nn.ModuleList([CoAttLayer(args) for _ in range(getattr(args, 'n_coatt_layers', 2))])
         self.state_head = nn.Linear(args.d_model, getattr(args, 'pre_steps', 1))
-        if self.args.load_pretrained and os.path.exists(f'checkpoints/TRACK_pretrain_test_TRACK_{args.data}_lr_{args.learning_rate}_ba_{args.batch_size}_epo_{args.train_epochs}_itr_0/checkpoint.pth'):
-            self.load_state_dict(torch.load(f'checkpoints/TRACK_pretrain_test_TRACK_{args.data}_lr_{args.learning_rate}_ba_{args.batch_size}_epo_{args.train_epochs}_itr_0/checkpoint.pth', 
+        if self.args.load_pretrained and os.path.exists(f'checkpoints/TRACK_pretrain_test_TRACK_{args.data}_lr_{args.learning_rate}_ba_{args.batch_size}_epo_{args.train_epochs}_itr_{args.ii}/checkpoint.pth'):
+            self.load_state_dict(torch.load(f'checkpoints/TRACK_pretrain_test_TRACK_{args.data}_lr_{args.learning_rate}_ba_{args.batch_size}_epo_{args.train_epochs}_itr_{args.ii}/checkpoint.pth', 
                                             map_location=self.args.device))
             print("Loaded pretrained.pth")
 

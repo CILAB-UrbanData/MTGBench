@@ -21,7 +21,7 @@ python -u run.py \
   --pre_steps 1 \
   --min_flow_count 10000 \
   --time_interval 120 \
-  --static_feat_dim 2 \
+  --static_feat_dim 4 \
   --feat_col 'length,oneway' \
   --shp_file map/edges.shp \
   --traj_file traj_porto.csv
